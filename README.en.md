@@ -14,6 +14,16 @@ Sidebar → Image viewer → tick a few images → press Open → compare side b
 
 The images are for you to look at. **They never enter the model's context** — twenty 2 MB screenshots add not a single word to the conversation.
 
+<p align="center">
+  <img src="assets/horizontal-layout.png" width="74%" alt="Left/right arrangement, three per page: three images compared side by side at 125%"><br>
+  <em>Left/right arrangement, three per page</em>
+</p>
+
+<p align="center">
+  <img src="assets/vertical-layout.png" width="74%" alt="Up/down arrangement, three per page: three images stacked, each independently zoomed and panned"><br>
+  <em>Up/down arrangement, three per page (the same set, just a different arrangement)</em>
+</p>
+
 ## What it does
 
 **Comparing several images** (the point of the plugin)

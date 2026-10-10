@@ -17,3 +17,6 @@ test/.probe.mjs
 .artifacts/
 .release/
 *.tgz
+
+# Release materials kept in the workspace, not shipped in the plugin.
+.publish/

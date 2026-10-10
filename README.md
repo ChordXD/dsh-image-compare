@@ -14,6 +14,16 @@
 
 图片只给你看，**不进模型上下文**：摆 20 张 2MB 的截图，对话里也不会多一个字。
 
+<p align="center">
+  <img src="assets/horizontal-layout.png" width="74%" alt="左右安排、每页 3 张：三张图片并排对比，缩放行显示 125%"><br>
+  <em>左右安排、每页 3 张</em>
+</p>
+
+<p align="center">
+  <img src="assets/vertical-layout.png" width="74%" alt="上下安排、每页 3 张：三张图片纵向堆叠，各自独立缩放与平移"><br>
+  <em>上下安排、每页 3 张（同一组图，换个安排方式即可）</em>
+</p>
+
 ## 主要功能
 
 **对比多张图**（核心）
