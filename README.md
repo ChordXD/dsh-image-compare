@@ -14,15 +14,20 @@
 
 图片只给你看，**不进模型上下文**：摆 20 张 2MB 的截图，对话里也不会多一个字。
 
-<p align="center">
-  <img src="assets/horizontal-layout.png" width="74%" alt="左右安排、每页 3 张：三张图片并排对比，缩放行显示 125%"><br>
-  <em>左右安排、每页 3 张</em>
-</p>
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/horizontal-layout.png" alt="左右安排、每页 3 张：三张图片并排对比，缩放行显示 125%"><br>
+      <sub>左右安排 · 每页 3 张</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/vertical-layout.png" alt="上下安排、每页 3 张：三张图片纵向堆叠，各自独立缩放与平移"><br>
+      <sub>上下安排 · 每页 3 张</sub>
+    </td>
+  </tr>
+</table>
 
-<p align="center">
-  <img src="assets/vertical-layout.png" width="74%" alt="上下安排、每页 3 张：三张图片纵向堆叠，各自独立缩放与平移"><br>
-  <em>上下安排、每页 3 张（同一组图，换个安排方式即可）</em>
-</p>
+<sub>同一组五张图，只是换了安排方式；两边都在 125%，底部缩略图条可拖动改顺序。</sub>
 
 ## 主要功能
 
