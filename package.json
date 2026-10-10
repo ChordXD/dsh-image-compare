@@ -1,0 +1,44 @@
+{
+  "name": "dsh-image-compare",
+  "version": "0.3.0",
+  "description": "Paginated image viewer for DeepSeek Harness: open a set of images in one pageable viewer, zoom and pan each image independently, reorder them by dragging the filmstrip, and browse the session workspace from inside the panel.",
+  "license": "MIT",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "image",
+    "viewer"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  },
+  "comment": {
+    "runtime": "The host half imports @deepseek-ai/dsh-tools and uses the `fs`, `tools` and `attachments` services; the client half requires only `react`, which every harness shell preloads. Every one of those is supplied by the running profile, so this package deliberately declares NO dependencies: an installed copy must never ship its own copy of a dsh framework package next to the host's.",
+    "tests": "test/host.test.mjs resolves the locally stubbed @deepseek-ai/dsh-tools from the workspace node_modules; test/client.dom.mjs needs react, react-dom and jsdom, installed on demand with `node <pnpm> add -D react@18.2.0 react-dom@18.2.0 jsdom`."
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.2",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  }
+}

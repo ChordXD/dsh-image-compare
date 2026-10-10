@@ -1,0 +1,19 @@
+# Dependencies are supplied by the running DSH profile, never vendored here.
+node_modules/
+
+# Local test dependencies and pnpm's own bookkeeping.
+.pnpm-store/
+pnpm-lock.yaml
+
+# Scratch files used while diagnosing layout/gesture problems.
+*.log
+.dbg.*
+*.dbg.js
+test/.dbg.dom.mjs
+test/vendor/client.dbg.mjs
+test/.probe.mjs
+
+# Build/test artifacts.
+.artifacts/
+.release/
+*.tgz
