@@ -24,6 +24,18 @@ globalThis.WheelEvent = dom.window.WheelEvent
 globalThis.MouseEvent = dom.window.MouseEvent
 globalThis.requestAnimationFrame = (callback) => dom.window.setTimeout(() => callback(Date.now()), 0)
 globalThis.cancelAnimationFrame = (handle) => dom.window.clearTimeout(handle)
+/**
+ * jsdom ships no ResizeObserver. The viewer uses one to re-measure a pane when its box
+ * changes, and guards against its absence — but a guard left at its fallback is a code
+ * path no check ever runs, so this stub keeps the real branch exercised. jsdom has no
+ * layout either, so it deliberately never fires: it exists to be constructed and
+ * disconnected, not to report resizes.
+ */
+globalThis.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 const ReactDefault = await import('react')
@@ -276,9 +288,22 @@ const paneWheel = async (pane, deltaY, modifiers = {}) => {
   return event
 }
 
-/** A middle-button press on one pane, as the pan gesture starts. */
+/**
+ * A middle-button press on one pane, as the pan gesture starts.
+ *
+ * `shiftKey` is stated explicitly rather than left to the event default. A plain press and
+ * a Shift press mean different gestures here — one moves a single image, the other moves the
+ * whole set — so a check that forgot the modifier would silently exercise the wrong one and
+ * then fail somewhere else, blaming the drag for what the setup got wrong.
+ */
 const middleDown = async (pane, modifiers = {}) => {
-  const event = new dom.window.MouseEvent('mousedown', { button: 1, bubbles: true, cancelable: true, ...modifiers })
+  const event = new dom.window.MouseEvent('mousedown', {
+    button: 1,
+    shiftKey: false,
+    bubbles: true,
+    cancelable: true,
+    ...modifiers,
+  })
   Object.defineProperty(event, 'clientX', { value: 200 })
   Object.defineProperty(event, 'clientY', { value: 200 })
   await act(async () => {
@@ -342,6 +367,10 @@ const resetEnvironment = () => {
     // Storage unavailable: nothing to leak.
   }
   exported.clearSettingsCache?.()
+  // The drag flag is module-scoped so a gesture survives a re-created pane; that also lets
+  // it survive one check. A real pointer ends every gesture with a click or a mouseup, so
+  // clearing it here reproduces that without weakening the rule it encodes.
+  exported.resetDragFlag?.()
   for (const node of document.querySelectorAll('body > div')) node.remove()
   mountedContainers.clear()
 }
@@ -1092,6 +1121,14 @@ await checkAsync('middle drag pans one image; Shift+middle drag pans every image
     node.scrollLeft = 500
     node.scrollTop = 500
   }
+  // Both canvases must actually hold what was just written. An earlier check's convergence
+  // window writes scroll offsets on a timer, and jsdom cannot repaint between its ticks, so
+  // a leftover tick could otherwise overwrite this setup and make the assertion below blame
+  // the drag for something that happened before it. Measured, not assumed: this says WHICH
+  // of the two it was instead of failing the gesture's own assertion.
+  if (canvases[1].scrollLeft !== 500) {
+    throw new Error(`the setup itself was overwritten: canvas 2 sits at ${canvases[1].scrollLeft}`)
+  }
 
   await middleDown(canvases[0])
   await dragPointer(80, 40)
@@ -1403,17 +1440,28 @@ await checkAsync('the 100% button reaches one image pixel per screen pixel', asy
   await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
   sizePager(900, 700)
 
-  // jsdom lays out nothing, so give the fit image a rect: "the pane shows the image at
-  // 0.5x" is what the button has to invert.
-  const fitImage = document.querySelector('.dshiv-fit img')
+  // jsdom lays out nothing, so model the pane's box by hand: an 800x600 image inside a
+  // 400x300 box is shown at 0.5x when fitted, which is what the button has to invert. The
+  // pane measures that box itself, so the box is what a check has to provide.
+  const pane = document.querySelector('.dshiv-pane')
+  if (pane === null) throw new Error('no pane was rendered')
+  const fitImage = pane.querySelector('.dshiv-fit img')
   if (fitImage === null) throw new Error('the pane has no fit image')
   Object.defineProperty(fitImage, 'naturalWidth', { value: 800, configurable: true })
-  fitImage.getBoundingClientRect = () => ({ width: 400, height: 300, top: 0, left: 0, right: 400, bottom: 300 })
+  Object.defineProperty(fitImage, 'naturalHeight', { value: 600, configurable: true })
+  Object.defineProperty(pane, 'clientWidth', { value: 400, configurable: true })
+  Object.defineProperty(pane, 'clientHeight', { value: 300, configurable: true })
+  // The pane re-measures on a window resize, which is the same path a real window uses.
+  await act(async () => {
+    window.dispatchEvent(new dom.window.Event('resize'))
+  })
 
   // A fitted pane reads as 100% already, which is exactly why the button looked like a
   // duplicate of 适应: the zoom is relative to the FIT, not to the pixels.
   const readout = () => document.querySelector('.dshiv-zoom').textContent.trim()
   assertEqual(readout(), '100%', 'a fitted image reads as 100% before the button is pressed')
+  const fitWidth = Number.parseFloat(pane.style.getPropertyValue('--dshiv-fit-w'))
+  assertEqual(fitWidth, 400, 'the pane published the width it fits the image into')
 
   const hundred = [...document.querySelectorAll('.dshiv-zoombar button')].find((node) => node.textContent.trim() === '100%')
   if (hundred === undefined) throw new Error('the zoom row has no 100% button')
@@ -1423,6 +1471,54 @@ await checkAsync('the 100% button reaches one image pixel per screen pixel', asy
   })
   // Fit is 0.5x, so actual pixels are 2x — NOT the 1x the readout used to snap back to.
   assertEqual(readout(), '200%', 'the button inverted the fit instead of resetting to 1x')
+
+  // The size the pane renders a magnified image at is `fitted * zoom`, NOT `natural * zoom`.
+  // Sizing from the natural pixels made the first zoom jump to actual size while the fitted
+  // view had been scaled down to fit — the change was abrupt and unrelated to the window.
+  const magnified = document.querySelector('.dshiv-canvas img')
+  if (magnified === null) throw new Error('no magnified image was rendered')
+  const shown = Number.parseFloat(magnified.style.width)
+  assertEqual(Number.isFinite(shown), true, 'the magnified image declares a width')
+  // Box 400x300 around an 800x600 image, then 2x: 800 on screen, not 800 * (800/400) = 1600.
+  assertEqual(Math.round(shown), 800, 'the first zoom continued from the fitted size')
+  if (shown > 800) throw new Error(`the zoom jumped past the window: ${shown}px`)
+
+  await view.unmount()
+})
+
+await checkAsync('the first zoom continues from the fitted size, not from the raw pixels', async () => {
+  const view = await mount(Card, { block: resultBlock(4), loadImage })
+  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  sizePager(900, 700)
+
+  // Model a pane whose box shows an 800x600 image at 400x300 (fitted at 0.5x).
+  const pane = document.querySelector('.dshiv-pane')
+  if (pane === null) throw new Error('no pane was rendered')
+  const fitImage = pane.querySelector('.dshiv-fit img')
+  if (fitImage === null) throw new Error('the pane has no fit image')
+  Object.defineProperty(fitImage, 'naturalWidth', { value: 800, configurable: true })
+  Object.defineProperty(fitImage, 'naturalHeight', { value: 600, configurable: true })
+  Object.defineProperty(pane, 'clientWidth', { value: 400, configurable: true })
+  Object.defineProperty(pane, 'clientHeight', { value: 300, configurable: true })
+  await act(async () => {
+    window.dispatchEvent(new dom.window.Event('resize'))
+  })
+  assertEqual(Number.parseFloat(pane.style.getPropertyValue('--dshiv-fit-w')), 400, 'the pane measured its fitted width')
+
+  // One notch of Ctrl+wheel is +25%. The image on screen must go 400 -> 500, a step the eye
+  // reads as zooming in. Sizing from raw pixels would have gone 400 -> 1000 in one notch.
+  const readout = () => document.querySelector('.dshiv-zoom').textContent.trim()
+  await paneWheel(pane, -120, { ctrlKey: true })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+  assertEqual(readout(), '125%', 'one wheel notch is 125%')
+  const first = document.querySelector('.dshiv-canvas img')
+  if (first === null) throw new Error('the first zoom rendered no magnified image')
+  assertEqual(Math.round(Number.parseFloat(first.style.width)), 500, 'the magnified width is fitted * zoom')
+  if (Number.parseFloat(first.style.width) !== 500) {
+    throw new Error(`the zoom did not start from the fitted size: ${first.style.width}`)
+  }
 
   await view.unmount()
 })
