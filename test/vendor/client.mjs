@@ -335,13 +335,14 @@ export function factory(require) {
 .dshiv-fitName{font-size:11px;color:var(--dsw-alias-label-secondary);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dshiv-fitStatus{font-size:12px;color:var(--dsw-alias-label-secondary);display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:12px}
 .dshiv-fitError{color:var(--dsw-alias-state-error-primary)}
-/* The scroll box carries the breathing room, NOT the content. Padding here sits OUTSIDE the
-   scrollbar, so a magnified image keeps the same gutter the fitted view has and the bars no
-   longer clamp onto the picture's own edge. box-sizing keeps that padding from inflating the
-   frame, which matters because the pane measures this box for its zoom reference.
-   The value is generous on purpose: a bar or two of pixels reads as "still touching", which
-   is exactly how this looked when it was 6px. */
-.dshiv-canvas{width:100%;max-width:100%;min-width:0;height:100%;max-height:100%;min-height:0;overflow:auto;display:block;scrollbar-width:thin;cursor:grab;flex:1 1 auto;box-sizing:border-box;padding:12px}
+/* One gutter, on the PANE. The selection outline is drawn on the pane, so this is what keeps
+   that outline off the picture — padding on the scroll box alone put the bars outside the
+   image but left the outline clamped to it, which is exactly how it looked. Border-box sizing
+   keeps the padding from widening the pane past its slot.
+   The scroll box gets only a token one: stacking two full gutters would shrink the image and
+   leave a double margin with nothing between them. */
+.dshiv-pane{box-sizing:border-box;padding:6px}
+.dshiv-canvas{width:100%;max-width:100%;min-width:0;height:100%;max-height:100%;min-height:0;overflow:auto;display:block;scrollbar-width:thin;cursor:grab;flex:1 1 auto;box-sizing:border-box;padding:2px}
 /* A scroll frame must be narrower than its content by construction, or there is nothing to
    scroll. Every flex item above it hands its content's width up as its own automatic
    minimum size, so the whole chain — page, pad, pane, canvas — pins min-width to 0 and
@@ -985,7 +986,11 @@ export function factory(require) {
        * fit → magnified switch visually continuous.
        */
       const fitSizeOf = () => {
-        const node = paneRef.current
+        // Measured from the SCROLL BOX, not the pane: the pane's padding is decoration around
+        // the frame, while the frame's own padding is what the image is laid out inside. Only
+        // the scroll box is attached when a pane is magnified, and its client box already
+        // excludes its border and any scrollbar.
+        const node = canvasRef.current ?? paneRef.current
         if (node === null) return null
         const style = window.getComputedStyle(node)
         const padX = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight)
