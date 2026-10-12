@@ -302,8 +302,12 @@ export function factory(require) {
 .dshiv-pager[data-axis="horizontal"]{scroll-snap-type:x mandatory;display:flex;flex-direction:row}
 .dshiv-pager[data-zoomed="true"]{scroll-snap-type:none}
 .dshiv-page{position:relative;display:flex;box-sizing:border-box;scroll-snap-align:start;scroll-snap-stop:always;flex:none;padding:16px;gap:16px}
-.dshiv-pager[data-axis="vertical"] .dshiv-page{height:100%;width:100%}
-.dshiv-pager[data-axis="horizontal"] .dshiv-page{width:100%;height:100%}
+/* A page is ONE container tall, but only as a floor: height:100% would clip a page whose
+   content still ends up taller (an image with a long caption, a very crowded page), and a
+   clipped page is what makes an image unreachable. min-height keeps the "one page = one
+   screen" geometry the paging math relies on while letting such a page grow and scroll. */
+.dshiv-pager[data-axis="vertical"] .dshiv-page{min-height:100%;width:100%}
+.dshiv-pager[data-axis="horizontal"] .dshiv-page{width:100%;min-height:100%}
 .dshiv-page[data-zoomed="true"]{scroll-snap-align:none}
 .dshiv-pad{display:flex;align-items:center;justify-content:center;min-width:0;max-width:100%;min-height:0;flex:1;gap:16px}
 /* Per-pane zoom: each image owns its own fit/canvas shell, so the page no longer
@@ -315,8 +319,14 @@ export function factory(require) {
    stops a pane collapsing to nothing when a page holds many images, while a short
    viewport still shrinks the pane instead of overlapping its neighbour. */
 .dshiv-pane{position:relative;display:flex;flex-direction:column;min-width:0;max-width:100%;min-height:0;flex:1 1 0}
-.dshiv-pager[data-axis="vertical"] .dshiv-pane{min-height:var(--dshiv-pane-min,120px)}
-.dshiv-pager[data-axis="horizontal"] .dshiv-pane{min-width:var(--dshiv-pane-min,120px)}
+/* One page is exactly one container tall, so the panes on it have to SHARE that height.
+   A fixed floor (12vh each) does not survive a narrow window: four panes then want 48vh
+   plus gaps plus padding, the page overflows, and every scroll offset stops being a whole
+   multiple of the container — which is what pushed the first image up out of view. The
+   floor is therefore capped by an even share of the space: the user's value is an upper
+   bound that yields to a crowded page, never a floor that overflows one. */
+.dshiv-pager[data-axis="vertical"] .dshiv-pane{min-height:min(var(--dshiv-pane-min,120px), calc(88% / var(--dshiv-pane-n,1)))}
+.dshiv-pager[data-axis="horizontal"] .dshiv-pane{min-width:min(var(--dshiv-pane-min,120px), calc(88% / var(--dshiv-pane-n,1)))}
 .dshiv-pane>.dshiv-pad{display:none}
 .dshiv-pane[data-zoomed="true"]>.dshiv-fit{display:none}
 .dshiv-pane[data-active="true"]{outline:1.5px solid var(--dsw-alias-brand-primary);outline-offset:2px;border-radius:var(--dsw-radius-sm,6px)}
@@ -1393,8 +1403,40 @@ export function factory(require) {
         line('图片 声明宽', image === null ? '—' : image.style.width || '（无）'),
         line('外壳 渲染宽', `pane ${rect(pane)} · pager ${rect(pager)} · panel ${rect(panel)}`),
         line('垂直 可视/可滚', `${canvas.clientHeight} / ${canvas.scrollHeight}`),
+        ...pagerLines(),
         ...rows,
       )
+    }
+
+    /**
+     * The paging container's own numbers, and where each pane sits inside it.
+     *
+     * Paging assumes one page is exactly one container height, so these are the values
+     * that tell whether an image can be pushed out of view: a page whose content is
+     * taller than the container, or a scroll offset that is not a whole multiple of it.
+     * A pane's `top` relative to the container is what shows WHO moved.
+     */
+    function pagerLines() {
+      const pager = document.querySelector('.dshiv-pager')
+      if (pager === null) return []
+      const offset = pager.scrollTop
+      const line = (label, value) => h('div', { className: 'dshiv-setRow dshiv-diagLine' }, `${label}：${value}`)
+      const panes = [...document.querySelectorAll('.dshiv-pane')]
+      const page = document.querySelector('.dshiv-page')
+      const bounds = pager.getBoundingClientRect()
+      return [
+        line('分页 高/内容高/滚动', `${pager.clientHeight} / ${pager.scrollHeight} / ${Math.round(offset)}`),
+        line('分页 一步 =', pager.clientHeight === 0 ? '—' : `${Math.round(offset / pager.clientHeight) * 100}% 于第 ${Math.round(offset / pager.clientHeight) + 1} 页`),
+        line('每页 高度/内容高', page === null ? '—' : `${page.clientHeight} / ${page.scrollHeight}`),
+        line(
+          '各图 相对顶部的偏移',
+          panes.map((node, index) => `${index + 1}:${Math.round(node.getBoundingClientRect().top - bounds.top)}`).join('  '),
+        ),
+        line(
+          '各图 高度',
+          panes.map((node, index) => `${index + 1}:${Math.round(node.getBoundingClientRect().height)}`).join('  '),
+        ),
+      ]
     }
 
     /**
@@ -1884,6 +1926,9 @@ export function factory(require) {
       const viewerStyle = {
         '--dshiv-font-size': `${settings.viewerFontSize}px`,
         '--dshiv-pane-min': `${settings.paneHeightVh}vh`,
+        // How many images share one page: the floor above is capped by an even share of
+        // the container, so this is what keeps a crowded page from overflowing it.
+        '--dshiv-pane-n': String(pageSize),
       }
 
       return h(

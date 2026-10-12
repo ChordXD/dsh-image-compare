@@ -143,7 +143,7 @@ Keyboard:
 | `F` | Show / hide the filmstrip |
 | `Esc` | Close the full-screen view |
 
-The gear panel holds: default zoom, images per page, whether the filmstrip starts open, the viewer's own font size, and the minimum height of one image.
+The gear panel holds: default zoom, images per page, whether the filmstrip starts open, the viewer's own font size, and the minimum height of one image. Images on a page share the available height, so that floor yields to a crowded page instead of pushing an image out of view.
 
 ## Optionally, let the model open the set
 
