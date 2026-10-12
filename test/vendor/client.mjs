@@ -329,6 +329,11 @@ export function factory(require) {
 .dshiv-pager[data-axis="horizontal"] .dshiv-pane{min-width:min(var(--dshiv-pane-min,120px), calc(88% / var(--dshiv-pane-n,1)))}
 .dshiv-pane>.dshiv-pad{display:none}
 .dshiv-pane[data-zoomed="true"]>.dshiv-fit{display:none}
+/* Overflow hiding is load-bearing here, not tidiness: a flex item's automatic minimum size is
+   its content's, and an image with max-height:100% never shrinks below that floor. Without it
+   a fitted picture can push its pane taller than the share the page gave it, and the panes
+   then overlap. Hiding the overflow makes the layout's height authoritative. */
+.dshiv-fit{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:0;min-height:0;flex:1;gap:8px;overflow:hidden}
 .dshiv-pane[data-active="true"]{outline:1.5px solid var(--dsw-alias-brand-primary);outline-offset:2px;border-radius:var(--dsw-radius-sm,6px)}
 /* The pane owns the gutter, and it is generous on purpose: the selection outline sits on the
    pane's outer edge, so everything between that edge and the picture is what the user reads as
