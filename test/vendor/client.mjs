@@ -330,18 +330,12 @@ export function factory(require) {
 .dshiv-pane>.dshiv-pad{display:none}
 .dshiv-pane[data-zoomed="true"]>.dshiv-fit{display:none}
 .dshiv-pane[data-active="true"]{outline:1.5px solid var(--dsw-alias-brand-primary);outline-offset:2px;border-radius:var(--dsw-radius-sm,6px)}
-.dshiv-fit{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:0;min-height:0;flex:1;gap:8px}
-.dshiv-fit img{display:block;max-width:100%;max-height:100%;object-fit:contain;border-radius:var(--dsw-radius-sm,6px);box-shadow:0 2px 12px rgba(0,0,0,.18)}
-.dshiv-fitName{font-size:11px;color:var(--dsw-alias-label-secondary);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dshiv-fitStatus{font-size:12px;color:var(--dsw-alias-label-secondary);display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:12px}
-.dshiv-fitError{color:var(--dsw-alias-state-error-primary)}
-/* One gutter, on the PANE. The selection outline is drawn on the pane, so this is what keeps
-   that outline off the picture — padding on the scroll box alone put the bars outside the
-   image but left the outline clamped to it, which is exactly how it looked. Border-box sizing
-   keeps the padding from widening the pane past its slot.
-   The scroll box gets only a token one: stacking two full gutters would shrink the image and
-   leave a double margin with nothing between them. */
-.dshiv-pane{box-sizing:border-box;padding:6px}
+/* The pane owns the gutter, and it is generous on purpose: the selection outline sits on the
+   pane's outer edge, so everything between that edge and the picture is what the user reads as
+   "the picture has room". A few pixels still looks glued — that is exactly how 6px looked.
+   The scroll box adds only a token amount: two full gutters would shrink the image for a
+   double margin with nothing between them. */
+.dshiv-pane{box-sizing:border-box;padding:12px}
 .dshiv-canvas{width:100%;max-width:100%;min-width:0;height:100%;max-height:100%;min-height:0;overflow:auto;display:block;scrollbar-width:thin;cursor:grab;flex:1 1 auto;box-sizing:border-box;padding:2px}
 /* A scroll frame must be narrower than its content by construction, or there is nothing to
    scroll. Every flex item above it hands its content's width up as its own automatic
