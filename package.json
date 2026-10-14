@@ -35,8 +35,8 @@
     }
   },
   "comment": {
-    "runtime": "The host half imports @deepseek-ai/dsh-tools and uses the `fs`, `tools` and `attachments` services; the client half requires only `react`, which every harness shell preloads. Every one of those is supplied by the running profile, so this package deliberately declares NO dependencies: an installed copy must never ship its own copy of a dsh framework package next to the host's.",
-    "tests": "test/host.test.mjs resolves the locally stubbed @deepseek-ai/dsh-tools from the workspace node_modules; test/client.dom.mjs needs react, react-dom and jsdom, installed on demand with `node <pnpm> add -D react@18.2.0 react-dom@18.2.0 jsdom`."
+    "runtime": "The host half uses the `fs` and `webServer` services to serve two read-only routes; the client half requires only `react`, which every harness shell preloads. Both are supplied by the running profile, so this package deliberately declares NO dependencies: an installed copy must never ship its own copy of a dsh framework package next to the host's.",
+    "tests": "test/host.test.mjs drives apply() against a stubbed context; test/client.dom.mjs needs react, react-dom and jsdom, installed on demand with `node <pnpm> add -D react@18.2.0 react-dom@18.2.0 jsdom`."
   },
   "devDependencies": {
     "jsdom": "^30.1.2",
