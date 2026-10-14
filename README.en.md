@@ -145,22 +145,6 @@ Keyboard:
 
 The gear panel holds: default zoom, images per page, whether the filmstrip starts open, the viewer's own font size, and the minimum height of one image. Images on a page share the available height, so that floor yields to a crowded page instead of pushing an image out of view.
 
-## Optionally, let the model open the set
-
-Instead of picking the images yourself, one tool call publishes a set **straight to the right-column panel** (the model does not open any UI for you). Handy when the images are not under the directory you are browsing — a relative path is resolved against the session workspace:
-
-```
-view_images(
-  images    = [{ path: "shots/before.png", label: "before" },
-               { path: "shots/after.png",  label: "after" }],
-  layout    = "vertical",   # or "horizontal"; vertical by default
-  page_size = 2,            # 1/2/3/4/6; 2 by default
-  title     = "Home page redesign",
-)
-```
-
-A card appears in the conversation; press **右侧栏** (right column) to carry on comparing in the panel. At most 60 images per call. `browse_images(path?, recursive?, max_depth?)` lists a directory, and omitting `path` lists the workspace root.
-
 ## How it differs from other image plugins
 
 | | Who looks at the image | How many at once | Bytes in the model context |
@@ -170,7 +154,11 @@ A card appears in the conversation; press **右侧栏** (right column) to carry 
 | Vision-bridge plugins | **the model** | several | **yes** (spends vision quota) |
 | **This plugin** | **you** | **a whole set, side by side, pageable** | **no** |
 
-In one line: it is a tool for **a person comparing several images**, not a channel for feeding images to a model.
+In one line: it is a tool for **a person comparing several images**, not a channel for feeding images to a model. Every image is fetched by the browser straight from this plugin's read-only routes, so the model neither reads the bytes nor handles them.
+
+## Roadmap
+
+- **Let the model open a set directly.** Today you pick the images in the panel's browser. The plan is to restore a tool (shaped like `view_images(images, layout, page_size, title)`) that publishes a set straight to the right-column panel, so no manual picking is needed. An earlier release had it, but the entry button on the conversation card could not reliably open the panel, so it was pulled back to make this release's panel solid first.
 
 ## License
 

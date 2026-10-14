@@ -161,9 +161,9 @@ exported.apply({
 })
 
 const failures = []
-// One Tool card + the column tab body + the column tab title.
+// The column tab body and its title chip. The Tool card is gone with the model-facing tools,
+// so claiming `tool.call.toolview` would be a seat for something that cannot render.
 const expectedSlots = [
-  'tool.call.toolview#view_images',
   'sidebar.right.pane.tab#dsh-image-compare',
   'sidebar.right.pane.tab.title#dsh-image-compare',
 ]
@@ -194,4 +194,4 @@ if (failures.length > 0) {
   console.error(`\nFAILED:\n${failures.map((line) => `  - ${line}`).join('\n')}`)
   process.exit(1)
 }
-console.log('\nOK: the client half registers its Tool card, its column tab (with a start-page entry) and its stylesheet, and disposes cleanly')
+console.log('\nOK: the client half registers its column tab (body, title chip, start-page entry) and its stylesheet, and disposes cleanly')

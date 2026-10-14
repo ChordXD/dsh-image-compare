@@ -128,11 +128,9 @@ function harness(files, directories = new Set()) {
     },
   }
   apply(ctx)
-  const tool = registeredTools.get('view_images')
-  assert.ok(tool !== undefined, 'view_images was registered')
-  const browse = registeredTools.get('browse_images')
-  assert.ok(browse !== undefined, 'browse_images was registered')
-  return { tool, browse, saved, registeredTools, registeredRoutes }
+  // This host half registers routes only: the model-facing Tools were removed for this
+  // release, so `registeredTools` stays empty and the assertions below are about the routes.
+  return { saved, registeredTools, registeredRoutes }
 }
 
 test('the panel browse route is registered with the host carrier', () => {
@@ -207,129 +205,6 @@ function assertOutputValid(tool, value) {
   const violations = validateValue(tool.output.schema, value)
   assert.deepEqual(violations, [], `execute returned a value the output schema rejects:\n  ${violations.join('\n  ')}`)
 }
-
-test('view_images declares a valid argument and output schema', () => {
-  const { tool } = harness({})
-  assert.equal(tool.name, 'view_images')
-  assert.equal(tool.parameters.type, 'object')
-  assert.deepEqual(tool.parameters.required, ['images'])
-  assert.equal(tool.parameters.properties.images.type, 'array')
-  assert.deepEqual(tool.parameters.properties.layout.enum, ['vertical', 'horizontal'])
-  assert.equal(tool.output.schema.type, 'object')
-  assert.ok(tool.output.schema.properties.images.items.properties.attachmentId)
-})
-
-test('execute opens every readable image and returns durable references', async () => {
-  const { tool, saved } = harness({
-    '/w/a.png': PNG,
-    '/w/nested/b.png': PNG,
-  })
-  const value = await tool.execute(
-    { images: [{ path: 'a.png' }, { path: 'nested/b.png', label: '第二个' }], layout: 'horizontal', page_size: 2 },
-    exec(),
-  )
-  assert.equal(value.layout, 'horizontal')
-  assert.equal(value.pageSize, 2)
-  assert.equal(value.images.length, 2)
-  assert.equal(value.failures, undefined)
-  assert.deepEqual(value.images.map((entry) => entry.path), ['/w/a.png', '/w/nested/b.png'])
-  assert.equal(value.images[0].mediaType, 'image/png')
-  assert.equal(value.images[0].attachmentId, 'att-1')
-  assert.equal(value.images[1].label, '第二个')
-  assert.equal(value.images[1].name, 'b.png')
-  assert.equal('image' in value.images[0], false, 'the reference must NOT be nested under an `image` key')
-  assert.equal(saved.length, 2)
-  assertOutputValid(tool, value)
-
-  // The client half reads its item list from this presentation channel.
-  const meta = tool.output.presentationMeta(undefined, value)
-  assert.ok(meta.viewImages !== undefined, 'presentationMeta exposes viewImages')
-  assert.equal(meta.viewImages.images.length, 2)
-  assert.equal(meta.viewImages.images[0].attachmentId, 'att-1')
-  assert.equal(meta.viewImages.images[0].path, '/w/a.png')
-  assert.equal(meta.viewImages.images[1].label, '第二个')
-  assert.equal(meta.viewImages.layout, 'horizontal')
-  assert.equal(meta.viewImages.pageSize, 2)
-})
-
-test('execute defaults layout and page size, and reports partial failures', async () => {
-  const { tool } = harness({ '/w/a.png': PNG })
-  const value = await tool.execute({ images: [{ path: 'a.png' }, { path: 'missing.png' }] }, exec())
-  assert.equal(value.layout, 'vertical')
-  assert.equal(value.pageSize, 2)
-  assert.equal(value.images.length, 1)
-  assert.equal(value.failures.length, 1)
-  assert.equal(value.failures[0].path, 'missing.png')
-  assert.match(value.failures[0].reason, /FS_NOT_FOUND/)
-  assertOutputValid(tool, value)
-})
-
-test('execute refuses non-images, empty lists, and oversized batches', async () => {
-  const { tool } = harness({ '/w/a.txt': new Uint8Array([1, 2, 3]), '/w/b.png': PNG })
-  await assert.rejects(
-    () => tool.execute({ images: [{ path: 'a.txt' }] }, exec()),
-    /no image could be opened/,
-  )
-  await assert.rejects(() => tool.execute({ images: [] }, exec()), /at least one image/)
-  await assert.rejects(
-    () => tool.execute({ images: Array.from({ length: 61 }, () => ({ path: 'b.png' })) }, exec()),
-    /at most 60/,
-  )
-  await assert.rejects(() => tool.execute({ images: [{ path: 'b.png' }], page_size: 9 }, exec()), /page_size/)
-})
-
-test('render emits a text summary naming the paging axis and page count', async () => {
-  const { tool } = harness({ '/w/a.png': PNG, '/w/b.png': PNG, '/w/c.png': PNG })
-  const value = await tool.execute({ images: [{ path: 'a.png' }, { path: 'b.png' }, { path: 'c.png' }] }, exec())
-  const blocks = tool.output.render({}, value)
-  assert.equal(blocks.length, 1)
-  assert.equal(blocks[0].type, 'text')
-  assert.match(blocks[0].text, /3 images/)
-  assert.match(blocks[0].text, /2 pages/)
-  assert.match(blocks[0].text, /up\/down/)
-  assertOutputValid(tool, value)
-})
-
-test('presentCall describes the call without reading anything', () => {
-  const { tool } = harness({})
-  const view = tool.presentCall({ images: [{ path: 'x.png' }, { path: 'y.png' }] })
-  assert.equal(view.card, 'generic')
-  assert.equal(view.title, 'View 2 images')
-  assert.deepEqual(view.locations, [{ path: 'x.png' }, { path: 'y.png' }])
-})
-
-test('browse_images lists subdirectories and image files only', async () => {
-  const { browse } = harness(
-    {
-      '/w/shots/a.png': PNG,
-      '/w/shots/b.jpg': PNG,
-      '/w/shots/notes.txt': Uint8Array.from([1, 2, 3]),
-    },
-    new Set(['/w/shots', '/w/shots/nested']),
-  )
-  const value = await browse.execute({ path: 'shots' }, exec())
-  assert.equal(value.path, '/w/shots')
-  assert.deepEqual(value.dirs, ['/w/shots/nested'])
-  assert.deepEqual(value.images, ['/w/shots/a.png', '/w/shots/b.jpg'])
-  assertOutputValid(browse, value)
-})
-
-test('browse_images walks deeper only when asked, and refuses a file', async () => {
-  const { browse } = harness(
-    {
-      '/w/a.png': PNG,
-      '/w/deep/b.png': PNG,
-    },
-    new Set(['/w/deep']),
-  )
-  // Absolute spelling keeps the fixture's own path rules out of the assertion.
-  const flat = await browse.execute({ path: '/w' }, exec())
-  assert.deepEqual(flat.images, ['/w/a.png'], `flat listing: ${JSON.stringify(flat)}`)
-  const deep = await browse.execute({ path: '/w', recursive: true, max_depth: 2 }, exec())
-  assert.deepEqual(deep.images, ['/w/a.png', '/w/deep/b.png'], `recursive listing: ${JSON.stringify(deep)}`)
-  await assert.rejects(() => browse.execute({ path: '/w/a.png' }, exec()), /not a directory/)
-  await assert.rejects(() => browse.execute({ path: '/w', max_depth: 9 }, exec()), /max_depth/)
-})
 
 test('the HTTP routes refuse anything outside the session workspace', async () => {
   // A workspace with one image, one plain-text file, plus a "secret" the routes

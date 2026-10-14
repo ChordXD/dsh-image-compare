@@ -53,12 +53,6 @@ export function factory(require) {
     }
     //#endregion
 
-    /** Wire tool name this view owns; the host half registers the same name. */
-    const TOOL_NAME = 'view_images'
-    /** Locale namespace: the composer/dictionary the Tool call rows already bind. */
-    const CONVERSATION_NS = 'conversation'
-    /** Inline thumbnails per row in the chat card. */
-    const THUMBNAIL_COLUMNS = 4
     /** Wheel deltas below this are trackpad noise, not a page gesture. */
     const WHEEL_THRESHOLD = 4
     /** How long one wheel gesture owns the pager before the next flip. */
@@ -209,21 +203,6 @@ export function factory(require) {
 
     //#region styles
     const CSS = `
-.dshiv-card{border:0.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-md,10px);background:var(--dsw-alias-bg-layer-1);overflow:hidden;margin:2px 0}
-.dshiv-cardHead{display:flex;align-items:center;gap:8px;padding:8px 10px;min-height:32px}
-.dshiv-cardIcon{display:inline-flex;align-items:center;flex:none;height:16px;width:16px;color:var(--dsw-alias-label-secondary)}
-.dshiv-cardIcon>svg{max-width:14px;max-height:14px;width:auto;height:auto;flex:none}
-.dshiv-cardTitle{font-size:13px;color:var(--dsw-alias-label-primary);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dshiv-cardMeta{font-size:12px;color:var(--dsw-alias-label-secondary);flex:none;font-variant-numeric:tabular-nums}
-.dshiv-grid{display:grid;gap:6px;padding:0 10px 10px}
-.dshiv-thumb{position:relative;display:flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-layer-2);border:0.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-sm,6px);overflow:hidden;padding:0;cursor:zoom-in;min-height:56px}
-.dshiv-thumb img{display:block;max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain}
-.dshiv-thumbStatus{font-size:11px;color:var(--dsw-alias-label-secondary);padding:8px}
-.dshiv-thumbBadge{position:absolute;left:0;right:0;bottom:0;font-size:10px;line-height:1.5;padding:1px 4px;color:var(--dsw-alias-label-primary);background:color-mix(in srgb, var(--dsw-alias-bg-overlay) 82%, transparent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
-.dshiv-open{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--dsw-alias-label-primary);background:transparent;border:0.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm,6px);padding:3px 8px;cursor:pointer;flex:none;height:24px;box-sizing:border-box}
-.dshiv-open>svg{max-width:13px;max-height:13px;width:auto;height:auto;flex:none}
-.dshiv-open:hover{background:var(--dsw-alias-bg-layer-2)}
-.dshiv-note{font-size:11px;color:var(--dsw-alias-state-warn-primary);padding:0 10px 8px}
 .dshiv-root{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;background:var(--dsw-alias-bg-overlay);color:var(--dsw-alias-label-primary);font-size:13px}
 /* Embedded shell: the same pager inside the right column instead of a floating
    layer. No fixed positioning and no stacking context of its own, so the column
@@ -298,7 +277,7 @@ export function factory(require) {
 /* The viewer's own text scale: set per instance from the plugin's settings. */
 .dshiv-root,.dshiv-panel{font-size:var(--dshiv-font-size,13px)}
 .dshiv-fitName,.dshiv-filmIndex{font-size:calc(var(--dshiv-font-size,13px) - 2px)}
-.dshiv-cardMeta,.dshiv-zoom{font-size:calc(var(--dshiv-font-size,13px) - 1px)}
+.dshiv-zoom{font-size:calc(var(--dshiv-font-size,13px) - 1px)}
 .dshiv-setRow,.dshiv-setNum,.dshiv-fitStatus{font-size:calc(var(--dshiv-font-size,13px) - 1px)}
 .dshiv-filmItem[data-selected="true"]{border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 1.5px var(--dsw-alias-brand-primary)}
 .dshiv-seg button[data-active="true"]{background:var(--dsw-alias-brand-primary);color:#fff}
@@ -452,37 +431,6 @@ export function factory(require) {
     }
 
     /**
-     * Viewer model of one settled `view_images` call.
-     *
-     * Sources, in order:
-     *   1. `block.meta.viewImages` — this tool's `output.presentationMeta`, the
-     *      framework's own channel for presentation data (the read-file card reads
-     *      `block.meta` the same way). It carries the full reference list with no
-     *      bytes and no conversation tokens.
-     *   2. `block.value` / `block.result.value` — replay of older logs.
-     *   3. `block.content` image blocks — the generic path: whatever image blocks
-     *      the result carries still render, so a future meta shape change degrades
-     *      to "images without captions" instead of "nothing to show".
-     */
-    function parseViewerResult(block) {
-      if (typeof block !== 'object' || block === null) return undefined
-      const meta = block.meta
-      const fromMeta =
-        typeof meta === 'object' && meta !== null && !Array.isArray(meta) ? fromPayload(meta.viewImages) : undefined
-      if (fromMeta !== undefined) return fromMeta
-      const fromValue = fromPayload(block.value ?? block.result?.value ?? block.result)
-      if (fromValue !== undefined) return fromValue
-      const content = Array.isArray(block.content) ? block.content : []
-      const images = []
-      for (const part of content) {
-        if (typeof part !== 'object' || part === null || part.type !== 'image') continue
-        const ref = narrowRef(part.attachment)
-        if (ref !== undefined) images.push(ref)
-      }
-      return images.length === 0 ? undefined : fromPayload({ images, layout: 'vertical', pageSize: 2 })
-    }
-
-    /**
      * Resolve one durable reference to a browser URL, memoized per loader.
      * A rejection releases its cache entry, so a later render retries; `retry`
      * drops an entry up front.
@@ -621,152 +569,6 @@ export function factory(require) {
 
     //#endregion
 
-    //#region chat card
-
-    /** One thumbnail: lazy, self-contained, never fatal. */
-    function Thumb({ resolve, item, index, onOpen }) {
-      const { url, failed } = useImageUrl(resolve, item.ref)
-      return h(
-        'button',
-        {
-          type: 'button',
-          className: 'dshiv-thumb',
-          title: item.path,
-          'aria-label': `打开看图器查看 ${item.name}`,
-          onClick: () => onOpen(index),
-        },
-        url === null
-          ? h('span', { className: 'dshiv-thumbStatus' }, failed ? '加载失败' : '加载中…')
-          : h('img', { src: url, alt: item.name, loading: 'lazy', decoding: 'async' }),
-        h('span', { className: 'dshiv-thumbBadge' }, `${index + 1}. ${item.name}`),
-      )
-    }
-
-    /** The `view_images` chat card: what was opened, plus the viewer entry point. */
-    function ImagesCard(props) {
-      const { block, loadImage } = props
-      const viewer = useMemo(() => parseViewerResult(block), [block])
-      const [open, setOpen] = useState(false)
-      const [startPage, setStartPage] = useState(0)
-      /**
-       * The set this card and its floating shell render.
-       *
-       * The floating shell renders from THIS component, not from the session slot, so a
-       * filmstrip reorder in full screen has to move local state as well as publish —
-       * otherwise the gesture is silently dropped.
-       */
-      const [shown, setShown] = useState(null)
-      const resolve = useMemo(
-        () => createImageResolver(loadImage, typeof loadImage?.peek === 'function' ? loadImage.peek : undefined),
-        [loadImage],
-      )
-      const active = shown ?? viewer
-      const pageSize = active?.pageSize ?? 2
-      const pageCount = active === undefined ? 0 : Math.max(1, Math.ceil(active.items.length / pageSize))
-      if (active === undefined) {
-        return h(
-          'div',
-          { className: 'dshiv-card' },
-          h('div', { className: 'dshiv-cardHead' }, h('span', { className: 'dshiv-cardTitle' }, '图片查看器')),
-          h('div', { className: 'dshiv-note' }, '这次调用的图片结果无法解析。'),
-        )
-      }
-      const openAt = (index) => {
-        setStartPage(Math.floor(index / pageSize))
-        setOpen(true)
-      }
-      /**
-       * Show the set in the right column.
-       *
-       * The shared state is published FIRST, then the column is navigated: the panel reads
-       * that state, so it has to be there before the tab becomes visible, or the user gets a
-       * frame of the previous set. `revealPanel` does the navigating through the column's own
-       * navigation controller.
-       */
-      const openInColumn = () => {
-        // Published into THIS conversation's slot: a slot per session is what keeps
-        // one conversation's images out of every other conversation's panel.
-        setViewerState({ viewer: active, resolve }, block.sessionId ?? props.sessionId)
-        revealPanel()
-      }
-
-      /** Reorder the set from the full-screen shell: local first, then published. */
-      const reorderHere = (from, to) => {
-        if (from === to || from < 0 || to < 0 || from >= active.items.length || to >= active.items.length) return
-        const next = [...active.items]
-        const [moved] = next.splice(from, 1)
-        next.splice(to, 0, moved)
-        const reordered = { ...active, items: next }
-        setShown(reordered)
-        setViewerState({ viewer: reordered, resolve }, block.sessionId ?? props.sessionId)
-      }
-
-      return h(
-        React.Fragment,
-        null,
-        h(
-          'div',
-          { className: 'dshiv-card' },
-          h(
-            'div',
-            { className: 'dshiv-cardHead' },
-            h('span', { className: 'dshiv-cardIcon' }, h(Icons.images, { size: 14 })),
-            h(
-              'span',
-              { className: 'dshiv-cardTitle' },
-              active.title ?? `已打开 ${active.items.length} 张图片`,
-            ),
-            h(
-              'span',
-              { className: 'dshiv-cardMeta' },
-              `${active.layout === 'horizontal' ? '左右' : '上下'}翻页 · 每页 ${pageSize} 张 · ${pageCount} 页`,
-            ),
-            h(
-              'button',
-              { type: 'button', className: 'dshiv-open', onClick: openInColumn, title: '在右侧栏打开（可与文件树并排）' },
-              h(Icons.images, { size: 13 }),
-              '右侧栏',
-            ),
-            h(
-              'button',
-              { type: 'button', className: 'dshiv-open', onClick: () => openAt(0), title: '全屏查看' },
-              h(Icons.expand, { size: 13 }),
-              '全屏',
-            ),
-          ),
-          h(
-            'div',
-            {
-              className: 'dshiv-grid',
-              style: { gridTemplateColumns: `repeat(${Math.min(THUMBNAIL_COLUMNS, active.items.length)}, minmax(0, 1fr))` },
-            },
-            active.items.map((item, index) =>
-              h(Thumb, { key: `${item.ref.attachmentId}:${index}`, resolve, item, index, onOpen: openAt }),
-            ),
-          ),
-          active.failures.length === 0
-            ? null
-            : h(
-                'div',
-                { className: 'dshiv-note' },
-                `${active.failures.length} 个路径未能打开：${active.failures
-                  .map((failure) => `${failure.path}（${failure.reason}）`)
-                  .join('；')}`,
-              ),
-        ),
-        open
-          ? h(Viewer, {
-              viewer: active,
-              resolve,
-              initialPage: startPage,
-              onClose: () => setOpen(false),
-              onReorder: reorderHere,
-            })
-          : null,
-      )
-    }
-
-    //#endregion
 
     //#region full-screen viewer
 
@@ -2036,7 +1838,19 @@ export function factory(require) {
         h(
           'div',
           embedded
-            ? { className: 'dshiv-panel', ref: panelRef, role: 'region', 'aria-label': viewer.title ?? '图片查看器', style: viewerStyle }
+            ? {
+                className: 'dshiv-panel',
+                ref: panelRef,
+                role: 'region',
+                // Focusable so the keyboard controls can belong to this panel: the embedded
+                // viewer only claims the arrow keys while the focus is inside it, which is what
+                // keeps a resident panel from swallowing the shell's global navigation. With no
+                // tab stop there is nothing for that focus to land on, so the keys would only
+                // ever reach the viewer by accident.
+                tabIndex: 0,
+                'aria-label': viewer.title ?? '图片查看器',
+                style: viewerStyle,
+              }
             : { className: 'dshiv-root', ref: panelRef, role: 'dialog', 'aria-modal': 'true', 'aria-label': viewer.title ?? '图片查看器', style: viewerStyle },
         h(
           'div',
@@ -2443,35 +2257,6 @@ export function factory(require) {
             description: () => '分页对比查看多张图片',
           },
         ],
-      }
-    }
-
-    /**
-     * The column service captured at activation, used to take the user to the panel when the
-     * viewer publishes a set. Module-scoped because the Tool card — not the plugin — is what
-     * calls it, and a Tool view receives no plugin context of its own.
-     *
-     * `sidebarRight` is the navigation controller: its `openTab(kind)` is what opens the
-     * column and brings the tab forward. `layout` cannot do this — its `openRightbar` only
-     * REPORTS how the panel is presented, so calling it left the user on whatever tab was
-     * already showing while the images were published behind it.
-     */
-    let sidebarRef
-
-    /** Capture the declared column service. */
-    function setColumnService(sidebarRight) {
-      sidebarRef = sidebarRight
-    }
-
-    /** Bring this plugin's tab forward in the right column. */
-    function revealPanel() {
-      if (sidebarRef === undefined) return
-      try {
-        sidebarRef.openTab(PANEL_KIND)
-      } catch (error) {
-        // A column that refuses navigation (no session surface yet) must not break the card:
-        // the set is already published, so the user finds it as soon as they open the tab.
-        console.warn('dsh-image-compare: could not open the right column', error)
       }
     }
 
@@ -3111,45 +2896,23 @@ export function factory(require) {
     /**
      * The plugin's hard requirements.
      *
-     * Only what the plugin truly needs: `slots` for the Tool card and the column tab,
-     * `uiConversation` for the scope the Tool view lives in, and `sidebarRight` to take the
-     * user to the panel.
-     *
-     * `sidebarRight` is the navigation controller — its `openTab(kind)` is what opens this
-     * column and brings the tab forward. `layout.openRightbar` cannot: it only REPORTS the
-     * panel's presentation without changing its expanded state, so the card's 「右侧栏」
-     * button used to publish the images and leave the screen untouched.
-     *
-     * Nothing else may be named here that the plugin does not actually need — a missing
-     * provider parks the package, and access without a declaration throws.
+     * Only what the plugin truly needs: `slots` for the column tab, and `uiConversation` for the
+     * scope the panel lives in. Nothing else may be named here that the plugin does not actually
+     * need — a missing provider parks the package, and access without a declaration throws.
      *
      * The workspace file namespaces are deliberately NOT declared: the panel reaches
      * directories and image bytes through the HOST's read-only routes, so declaring
      * the Client carrier here would only add a dependency that answers
      * `gateway/bad-request` for a plugin-scoped caller.
      */
-    const inject = ['slots', 'uiConversation', 'sidebarRight']
+    const inject = ['slots', 'uiConversation']
 
     /**
-     * Register the viewer: its Tool card and its right-column tab type.
+     * Register the viewer: its right-column tab type.
      * @param ctx - the client plugin context.
      */
     function apply(ctx) {
       ctx.effect(() => insertStylesheet(), 'dsh-image-compare: stylesheet')
-      // `layout` is a DECLARED dependency, so it is read as a property instead of
-      // through a lookup helper: the card's 「右侧栏」 button then degrades to
-      // "publish only" wherever a shell does not provide it.
-      setColumnService(ctx.sidebarRight)
-      ctx.slots.inject('tool.call.toolview', () =>
-        ctx.slots.register(
-          {
-            name: 'tool.call.toolview',
-            key: TOOL_NAME,
-            locale: CONVERSATION_NS,
-          },
-          ImagesCard,
-        ),
-      )
       // The right-column tab: the TYPE goes into the tabs registry (that is what
       // lists it on the column's start page through its `guide` entries), and the
       // body/title into the two keyed slots.
@@ -3187,5 +2950,14 @@ export function factory(require) {
     exports.resetDragFlag = () => {
       lastDragRef.current = false
     }
+    /**
+     * Test seam only: publish a set the way the panel queue would.
+     *
+     * The panel reads its set from this store, and in production the store is written only by
+     * the queue's own 「打开」 button. Keeping one writer is right, but it would also force a
+     * check about paging, zooming or panning to drive the whole directory browser first. This
+     * publishes the same shape directly, so those checks stay about the viewer.
+     */
+    exports.publishViewerState = setViewerState
     return module.exports
 }

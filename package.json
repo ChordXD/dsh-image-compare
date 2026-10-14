@@ -1,7 +1,7 @@
 {
   "name": "dsh-image-compare",
-  "version": "0.3.0",
-  "description": "Paginated image viewer for DeepSeek Harness: open a set of images in one pageable viewer, zoom and pan each image independently, reorder them by dragging the filmstrip, and browse the session workspace from inside the panel.",
+  "version": "0.4.0",
+  "description": "Sidebar image comparer for DeepSeek Harness: browse the session workspace inside the right-column panel, open a set of images into one pageable viewer, zoom and pan each image independently, sync one view onto the whole set, and reorder them by dragging the filmstrip.",
   "license": "MIT",
   "keywords": [
     "deepseek-harness",

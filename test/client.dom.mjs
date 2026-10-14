@@ -56,8 +56,6 @@ const REQUIRED_SPECIFIERS = []
 
 function createClient() {
   const calls = { load: 0, peek: 0 }
-  /** What the card asked the column to open, in order. */
-  const openedTabs = []
   const loadImage = (ref) => {
     calls.load += 1
     return Promise.resolve(`${IMAGE_URL}#${ref.attachmentId}`)
@@ -90,17 +88,13 @@ function createClient() {
   // `styles` read is what parked the package in the field).
   const declared = new Set(['effect', 'slots', 'get', 'inject', ...exported.inject])
   /**
-   * The column's navigation controller, shaped like the real one.
+   * The column's navigation controller stub.
    *
-   * `openTab` is what opens that column and brings the tab forward — `layout.openRightbar`
-   * only reports the panel's presentation, so it cannot stand in here: a stub that accepted
-   * it would hide the very bug this replaced.
+   * It carries no methods: nothing navigates the column any more, because the plugin no longer
+   * renders a Tool card to press. The stub exists only so `ctx.sidebarRight` resolves — the
+   * plugin declares the seat, and the Proxy below throws on reading an undeclared property.
    */
-  const sidebarRight = {
-    openTab: (kind) => {
-      openedTabs.push(kind)
-    },
-  }
+  const sidebarRight = {}
   /** The session workspace file namespace, shaped like the built-in file tab expects. */
   const workspaceFiles = {
     list: async () => ({ ok: true, value: { entries: [], truncated: false } }),
@@ -148,7 +142,6 @@ function createClient() {
     registered,
     effects,
     effectDisposers,
-    openedTabs,
     tabTypes,
   }
 }
@@ -189,7 +182,59 @@ function resultBlock(count, extra = {}) {
 /** Host nodes every `mount` created, so the next one can drop abandoned trees. */
 const mountedContainers = new Set()
 
+/**
+ * Publish a set the way the panel's own queue does, for the viewer checks.
+ *
+ * Those checks used to hang off the Tool card, which no longer exists. The panel reads the
+ * same store, so they publish here and mount the panel. The resolver is built the way a check
+ * needs it to behave, not by reaching into the plugin's internals.
+ */
+function publishFrom(block, load) {
+  const source = block?.meta?.viewImages
+  if (source === undefined) return undefined
+  const cache = new Map()
+  const resolve = (ref) => {
+    const key = ref.attachmentId
+    const cached = cache.get(key)
+    if (cached !== undefined) return cached
+    const pending = Promise.resolve()
+      .then(() => load(ref))
+      .then((url) => {
+        if (typeof url !== 'string' || url === '') throw new Error('image loader returned no URL')
+        return url
+      })
+      .catch((error) => {
+        if (cache.get(key) === pending) cache.delete(key)
+        throw error
+      })
+    cache.set(key, pending)
+    return pending
+  }
+  resolve.retry = (ref) => cache.delete(ref.attachmentId)
+  exported.publishViewerState({
+    viewer: {
+      layout: source.layout,
+      pageSize: source.pageSize,
+      title: undefined,
+      failures: source.failures ?? [],
+      // `items` is the field the viewer reads; each entry carries its durable ref and caption.
+      items: source.images.map((image) => ({ ref: image, name: image.name })),
+    },
+    resolve,
+  })
+  return source
+}
+
 async function mount(component, props) {
+  // Two ways a check describes what to look at, both publishing before the panel renders,
+  // because the panel reads that store on its first render:
+  //   `block`   — the whole host result, used by checks that exercise the card shape
+  //   `publish` — the set alone, for checks about the panel itself
+  if (props?.block !== undefined && props?.loadImage !== undefined) {
+    publishFrom(props.block, props.loadImage)
+  } else if (props?.publish !== undefined) {
+    publishFrom(props.publish, props.loadImage ?? loadImage)
+  }
   // Preferences persist by design, so a check that changes them would silently alter
   // every later check's page size, font and box height. Every mount starts clean.
   try {
@@ -379,6 +424,10 @@ const resetEnvironment = () => {
   // it survive one check. A real pointer ends every gesture with a click or a mouseup, so
   // clearing it here reproduces that without weakening the rule it encodes.
   exported.resetDragFlag?.()
+  // The published set is module-scoped too: it outlives a panel unmount by design, because
+  // the panel is a resident tab. A check that publishes would otherwise leave its set for the
+  // next one — which is exactly what a "starts empty" assertion is there to notice.
+  exported.publishViewerState(undefined)
   for (const node of document.querySelectorAll('body > div')) node.remove()
   mountedContainers.clear()
 }
@@ -464,19 +513,19 @@ if (cssProblems.length > 0) {
   process.exit(1)
 }
 
-const { exported, ctx, loadImage, registered, effects, effectDisposers, openedTabs, tabTypes } = createClient()
+const { exported, ctx, loadImage, registered, effects, effectDisposers, tabTypes } = createClient()
 const registrationOf = (name, key) =>
   registered.find((entry) => entry.registration.name === name && entry.registration.key === key)
 
-check('exports the plugin face, inserts its own stylesheet, and claims both seats', () => {
+check('exports the plugin face, inserts its own stylesheet, and claims its seats', () => {
   assertEqual(typeof exported.apply, 'function', 'apply is exported')
   assertEqual(Array.isArray(exported.inject) && exported.inject.includes('slots'), true, 'inject declares slots')
-  assertEqual(exported.inject.includes('sidebarRight'), true, 'inject declares the column navigation seat')
+  // The sidebar tool registers no Tool view: the model-facing card was removed, so claiming
+  // `tool.call.toolview` at all would be a seat for something that cannot render.
+  assertEqual(exported.inject.includes('sidebarRight'), false, 'no column navigation seat is needed any more')
   exported.apply(ctx)
 
-  const card = registrationOf('tool.call.toolview', 'view_images')
-  if (card === undefined) throw new Error(`the Tool card is not registered: ${JSON.stringify(registered.map((r) => r.registration))}`)
-  assertEqual(typeof card.component, 'function', 'the Tool card has a component')
+  assertEqual(registrationOf('tool.call.toolview', 'view_images'), undefined, 'no Tool view is claimed')
 
   const panel = registrationOf('sidebar.right.pane.tab', 'dsh-image-compare')
   if (panel === undefined) throw new Error('the right-column tab type is not registered')
@@ -497,7 +546,7 @@ check('exports the plugin face, inserts its own stylesheet, and claims both seat
   // guard proxy above would have thrown on.
   const tag = document.querySelector('style[data-plugin-css="dsh-image-compare"]')
   if (tag === null) throw new Error('stylesheet tag was not inserted')
-  if (!tag.textContent.includes('.dshiv-root')) throw new Error('stylesheet tag carries the viewer CSS')
+  if (!tag.textContent.includes('.dshiv-panel')) throw new Error('stylesheet tag carries the viewer CSS')
   if (document.querySelectorAll('style[data-plugin-css="dsh-image-compare"]').length !== 1) {
     throw new Error('stylesheet tag is not unique')
   }
@@ -513,46 +562,49 @@ check('exports the plugin face, inserts its own stylesheet, and claims both seat
   assertEqual(document.querySelector('style[data-plugin-css="dsh-image-compare"]'), null, 'disposer removes the tag')
 })
 
-const Card = registrationOf('tool.call.toolview', 'view_images')?.component
 const Panel = registrationOf('sidebar.right.pane.tab', 'dsh-image-compare')?.component
 
-await checkAsync('the chat card lists every image and its paging metadata', async () => {
-  const view = await mount(Card, { block: resultBlock(5), loadImage, sessionId: 's1' })
-  const text = view.container.textContent
-  if (!text.includes('已打开 5 张图片')) throw new Error(`card title missing: ${text}`)
-  if (!text.includes('上下翻页')) throw new Error(`paging axis missing: ${text}`)
-  if (!text.includes('每页 2 张')) throw new Error(`page size missing: ${text}`)
-  if (!text.includes('3 页')) throw new Error(`page count missing: ${text}`)
-  const thumbs = view.container.querySelectorAll('.dshiv-thumb img')
-  assertEqual(thumbs.length, 5, 'five thumbnails rendered')
-  if (!thumbs[0].src.includes('att-1')) throw new Error('thumbnail resolved through loadImage')
-  if (!view.container.textContent.includes('5. shot-5.png')) throw new Error('per-image caption missing')
+
+/**
+ * Start a check inside its own copy of the viewer.
+ *
+ * The viewer checks used to read from `document` because the card opened a floating shell.
+ * The panel embeds the same viewer instead, so each check gets a private tree and queries are
+ * redirected into it: a query that escaped would otherwise match a previous check's nodes.
+ * The tree unmounts when the check's node dispatcher runs (`endScoped`).
+ */
+let scopedView = null
+const openScoped = async (props) => {
+  scopedView = await mount(Panel, props)
+  const saved = { one: document.querySelector, all: document.querySelectorAll }
+  document.querySelector = (selector) => scopedView.container.querySelector(selector)
+  document.querySelectorAll = (selector) => scopedView.container.querySelectorAll(selector)
+  // The embedded viewer only claims the arrow keys while the focus is inside it — that rule is
+  // what keeps a resident panel from stealing global navigation. A real user reaches it by
+  // clicking the panel, so the scope does the same once, up front.
+  const first = scopedView.container.querySelector('.dshiv-panel')
+  if (first !== null) first.focus()
+  return scopedView
+}
+
+/** Drop the current tree and restore the real query methods. */
+const endScoped = async () => {
+  if (scopedView === null) return
+  const view = scopedView
+  scopedView = null
+  document.querySelector = realQuery.one
+  document.querySelectorAll = realQuery.all
   await view.unmount()
-})
+}
 
-await checkAsync('a failed path is reported instead of failing the card', async () => {
-  const block = resultBlock(1, { failures: [{ path: '/w/missing.png', reason: 'no such file' }] })
-  const view = await mount(Card, { block, loadImage })
-  if (!view.container.textContent.includes('1 个路径未能打开')) throw new Error('failure notice missing')
-  if (!view.container.textContent.includes('/w/missing.png')) throw new Error('failure path missing')
-  await view.unmount()
-})
+const realQuery = { one: document.querySelector, all: document.querySelectorAll }
 
-await checkAsync('an unparseable result degrades to a notice instead of throwing', async () => {
-  const view = await mount(Card, { block: { result: { value: { nothing: true } } }, loadImage })
-  if (!view.container.textContent.includes('无法解析')) throw new Error('fallback notice missing')
-  if (view.container.querySelector('.dshiv-thumb') !== null) throw new Error('no thumbnails expected')
-  await view.unmount()
-})
-
-await checkAsync('opening the viewer pages with the arrow keys, and Escape closes it', async () => {
-  const view = await mount(Card, { block: resultBlock(5), loadImage })
-  const openButton = [...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏'))
-  if (openButton === undefined) throw new Error('open button missing')
-  await click(openButton)
-
-  const root = document.querySelector('.dshiv-root')
-  if (root === null) throw new Error('viewer did not open')
+await checkAsync('the panel viewer pages with the arrow keys', async () => {
+  const view = await openScoped({ publish: resultBlock(5) })
+  // The panel embeds the viewer, so it is on screen as soon as a set is published — there is
+  // no open button to press any more.
+  const root = document.querySelector('.dshiv-panel')
+  if (root === null) throw new Error('the panel did not render its viewer')
   if (!root.textContent.includes('第 1/3 页')) throw new Error(`initial page label wrong: ${root.textContent}`)
   if (!root.textContent.includes('图片 1-2/5')) throw new Error('initial image range wrong')
 
@@ -561,25 +613,22 @@ await checkAsync('opening the viewer pages with the arrow keys, and Escape close
   pager.scrollTo = (options) => { scrolls.push(options) }
 
   await press('ArrowDown')
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 2/3 页')) throw new Error('ArrowDown did not page')
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 2/3 页')) throw new Error('ArrowDown did not page')
   if (scrolls.at(-1)?.top !== 700) throw new Error(`vertical paging scrolled wrong: ${JSON.stringify(scrolls.at(-1))}`)
 
   await press('ArrowRight')
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 3/3 页')) throw new Error('ArrowRight did not page')
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 3/3 页')) throw new Error('ArrowRight did not page')
   await press('ArrowDown')
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 3/3 页')) throw new Error('paging ran past the last page')
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 3/3 页')) throw new Error('paging ran past the last page')
 
   await press('Home')
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 1/3 页')) throw new Error('Home did not return to the first page')
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 1/3 页')) throw new Error('Home did not return to the first page')
 
-  await press('Escape')
-  if (document.querySelector('.dshiv-root') !== null) throw new Error('Escape did not close the viewer')
-  await view.unmount()
+  await endScoped()
 })
 
 await checkAsync('the layout toggle switches the paging axis and resets the page', async () => {
-  const view = await mount(Card, { block: resultBlock(5, { layout: 'horizontal' }), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5, { layout: 'horizontal' }) })
   const pager = () => document.querySelector('.dshiv-pager')
   assertEqual(pager().getAttribute('data-axis'), 'horizontal', 'starts on the payload axis')
 
@@ -598,34 +647,32 @@ await checkAsync('the layout toggle switches the paging axis and resets the page
 
   await click(vertical)
   assertEqual(pager().getAttribute('data-axis'), 'vertical', 'axis switched')
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 1/3 页')) throw new Error('page did not reset on axis change')
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 1/3 页')) throw new Error('page did not reset on axis change')
   await press('ArrowDown')
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 2/3 页')) throw new Error('vertical paging broken after the switch')
-  await view.unmount()
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 2/3 页')) throw new Error('vertical paging broken after the switch')
+  await endScoped()
 })
 
 await checkAsync('a wheel gesture flips exactly one page while fitted', async () => {
-  const view = await mount(Card, { block: resultBlock(5), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5) })
   sizePager(900, 700)
 
   const first = await wheel(120)
   assertEqual(first.defaultPrevented, true, 'the page gesture is claimed')
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 2/3 页')) throw new Error('wheel did not page forward')
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 2/3 页')) throw new Error('wheel did not page forward')
 
   const throttled = await wheel(120)
   assertEqual(throttled.defaultPrevented, true, 'the follow-up gesture is still claimed')
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 2/3 页')) throw new Error('wheel paged twice for one gesture')
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 2/3 页')) throw new Error('wheel paged twice for one gesture')
 
   await new Promise((resolve) => setTimeout(resolve, 220))
   await wheel(-120)
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 1/3 页')) throw new Error('wheel did not page back')
-  await view.unmount()
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 1/3 页')) throw new Error('wheel did not page back')
+  await endScoped()
 })
 
 await checkAsync('zoomed pages keep native panning, and the filmstrip jumps pages', async () => {
-  const view = await mount(Card, { block: resultBlock(5), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5) })
   sizePager(900, 700)
 
   await press('+')
@@ -636,7 +683,7 @@ await checkAsync('zoomed pages keep native panning, and the filmstrip jumps page
 
   const pinned = await wheel(120)
   assertEqual(pinned.defaultPrevented, false, 'a zoomed page keeps native panning')
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 1/3 页')) throw new Error('zoomed wheel must not page')
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 1/3 页')) throw new Error('zoomed wheel must not page')
 
   await press('0')
   assertEqual(document.querySelectorAll('.dshiv-canvas').length, 0, 'fit restores the page layout')
@@ -644,14 +691,13 @@ await checkAsync('zoomed pages keep native panning, and the filmstrip jumps page
   const film = document.querySelectorAll('.dshiv-filmItem')
   assertEqual(film.length, 5, 'filmstrip lists every image')
   await click(film[4])
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 3/3 页')) throw new Error('filmstrip did not jump to the last page')
-  await view.unmount()
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 3/3 页')) throw new Error('filmstrip did not jump to the last page')
+  await endScoped()
 })
 
 await checkAsync('a rejected loader is retryable and never breaks the page', async () => {
   let failures = 0
-  // The card mounts one thumbnail load per image; fail the first four calls so the
-  // viewer's panes start failed too, then serve every retry.
+  // Fail the first loads so the viewer's panes start failed, then serve every retry.
   const flaky = (ref) => {
     if (failures < 4) {
       failures += 1
@@ -660,24 +706,20 @@ await checkAsync('a rejected loader is retryable and never breaks the page', asy
     return Promise.resolve(`${IMAGE_URL}#${ref.attachmentId}`)
   }
   flaky.peek = () => undefined
-  const view = await mount(Card, { block: resultBlock(2), loadImage: flaky })
-  const failed = [...view.container.querySelectorAll('.dshiv-thumbStatus')].map((node) => node.textContent)
-  if (!failed.includes('加载失败')) throw new Error(`expected a failed thumbnail, saw ${JSON.stringify(failed)}`)
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5), loadImage: flaky })
   const retry = [...document.querySelectorAll('.dshiv-btn')].filter((node) => node.textContent === '重试')
-  assertEqual(retry.length, 2, 'both panes offer a retry')
+  if (retry.length === 0) throw new Error('a failed load offered no retry')
   await click(retry[0])
   if (document.querySelectorAll('.dshiv-fit img').length === 0) throw new Error('retry did not load the image')
-  await view.unmount()
+  await endScoped()
 })
 
 await checkAsync('every inline icon keeps its declared size in the DOM', async () => {
-  const view = await mount(Card, { block: resultBlock(3), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5) })
   const seats = [
-    ...[...document.querySelectorAll('.dshiv-root .dshiv-bar button')].map((node) => ({ where: 'toolbar', node })),
-    ...[...document.querySelectorAll('.dshiv-root .dshiv-zoombar button')].map((node) => ({ where: 'zoombar', node })),
-    ...[...document.querySelectorAll('.dshiv-root .dshiv-cardIcon')].map((node) => ({ where: 'card-icon', node })),
+    ...[...document.querySelectorAll('.dshiv-panel .dshiv-bar button')].map((node) => ({ where: 'toolbar', node })),
+    ...[...document.querySelectorAll('.dshiv-panel .dshiv-zoombar button')].map((node) => ({ where: 'zoombar', node })),
+    ...[...document.querySelectorAll('.dshiv-panel .dshiv-filmitem')].map((node) => ({ where: 'card-icon', node })),
   ]
   let checked = 0
   for (const { where, node } of seats) {
@@ -698,33 +740,33 @@ await checkAsync('every inline icon keeps its declared size in the DOM', async (
       if (!inline.includes('flex')) throw new Error(`${label}: icon lacks the inline flex guard: ${JSON.stringify(inline)}`)
     }
   }
-  if (checked < 6) throw new Error(`expected the toolbar and card icons, saw ${checked}`)
-  await view.unmount()
+  if (checked < 6) throw new Error(`expected the toolbar and zoom row icons, saw ${checked}`)
+  await endScoped()
 })
 
-await checkAsync('the card publishes the set to the right-column panel and opens the column', async () => {
-  // The panel is mounted first and shows its empty state: it is a resident tab,
-  // not something the card re-creates.
+await checkAsync('the panel starts empty and follows a published set', async () => {
+  // The panel is a resident tab: it shows its empty state until something publishes a set,
+  // and then follows that set without being remounted.
+  // This check is about the EMPTY state first, so it must not publish on mount.
   const panel = await mount(Panel, {})
   if (!panel.container.textContent.includes('还没有打开的图片')) throw new Error('panel did not start empty')
   // The queue is the panel's edit surface: it starts empty and says how to fill it.
   if (!panel.container.textContent.includes('队列为空')) throw new Error('panel did not start with an empty queue')
+  // Nothing published yet, so the embedded shell has nothing to draw.
+  assertEqual(panel.container.querySelector('.dshiv-panel'), null, 'an empty panel draws no viewer')
 
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  const button = [...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('右侧栏'))
-  if (button === undefined) throw new Error('the card has no right-column entry')
-  const before = openedTabs.length
-  await click(button)
-  if (openedTabs.length !== before + 1) throw new Error('the entry did not ask the column to open this tab')
+  // The queue's own 「打开」 button is the production writer; publish the set it would.
+  publishFrom(resultBlock(4), loadImage)
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
 
-  // The already-mounted panel now follows the published set.
-  const text = panel.container.textContent
-  if (!text.includes('已打开 4 张图片') && !text.includes('4 张图片')) throw new Error(`panel did not follow the set: ${text}`)
-  if (panel.container.querySelectorAll('img').length === 0) throw new Error('panel rendered no images')
   if (panel.container.querySelector('.dshiv-panel') === null) throw new Error('panel did not use the embedded shell')
+  const text = panel.container.textContent
+  if (!text.includes('4 张图片')) throw new Error(`panel did not follow the set: ${text}`)
+  if (panel.container.querySelectorAll('img').length === 0) throw new Error('panel rendered no images')
 
   await panel.unmount()
-  await view.unmount()
 })
 
 await checkAsync('the queue is edited by selection, reorderable, and only 「打开」 publishes it', async () => {
@@ -745,7 +787,7 @@ await checkAsync('the queue is edited by selection, reorderable, and only 「打
     return { ok: true, status: 200, headers: new Map([['content-type', 'image/png']]).get && { get: () => 'image/png' } }
   }
   try {
-    const panel = await mount(Panel, {})
+    const panel = await mount(Panel, { publish: resultBlock(5) })
     await new Promise((resolve) => setTimeout(resolve, 0))
     const rowFor = (label) =>
       [...panel.container.querySelectorAll('button.dshiv-pickerItem')].find((node) => node.textContent.includes(label))
@@ -888,7 +930,7 @@ await checkAsync('a directory with no images still offers a way back up, and the
   const realFetch = globalThis.fetch
   globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => listing })
   try {
-    const panel = await mount(Panel, {})
+    const panel = await mount(Panel, { publish: resultBlock(5) })
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     const pathInput = panel.container.querySelector('.dshiv-pickerPath')
@@ -978,7 +1020,7 @@ await checkAsync('an internal image drag never reaches the document-level attach
   }
   for (const type of ['dragenter', 'dragover', 'drop']) document.addEventListener(type, watch)
   try {
-    const panel = await mount(Panel, {})
+    const panel = await mount(Panel, { publish: resultBlock(5) })
     await new Promise((resolve) => setTimeout(resolve, 0))
     for (const label of ['alpha.png', 'beta.png']) {
       const row = [...panel.container.querySelectorAll('button.dshiv-pickerItem')].find((node) => node.textContent.includes(label))
@@ -1031,8 +1073,7 @@ await checkAsync('an internal image drag never reaches the document-level attach
 })
 
 await checkAsync('Ctrl+wheel zooms exactly one image, and the zoom row reads it', async () => {
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5) })
   sizePager(900, 700)
 
   // Before any zoom every pane is fitted: no scroll box exists.
@@ -1052,12 +1093,11 @@ await checkAsync('Ctrl+wheel zooms exactly one image, and the zoom row reads it'
   // Scrolling the pointer panes that one image; the neighbour has no scroll box to move.
   assertEqual(canvases[0].getAttribute('data-pane-index'), '0', 'the canvas names its image')
 
-  await view.unmount()
+  await endScoped()
 })
 
 await checkAsync('the zoom row drives one image, and its buttons reset it', async () => {
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5) })
   sizePager(900, 700)
 
   const button = (label) => [...document.querySelectorAll('.dshiv-zoombar button')].find((node) => node.textContent.trim() === label)
@@ -1087,12 +1127,11 @@ await checkAsync('the zoom row drives one image, and its buttons reset it', asyn
   await click(reset)
   assertEqual(document.querySelectorAll('.dshiv-canvas').length, 0, '重置 clears every override')
 
-  await view.unmount()
+  await endScoped()
 })
 
 await checkAsync('同步全部 and Ctrl+Shift+wheel zoom the whole set', async () => {
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(4) })
   sizePager(900, 700)
 
   const panes = [...document.querySelectorAll('.dshiv-pane')]
@@ -1108,12 +1147,11 @@ await checkAsync('同步全部 and Ctrl+Shift+wheel zoom the whole set', async (
   await paneWheel(document.querySelectorAll('.dshiv-pane')[1], -120, { ctrlKey: true, shiftKey: true })
   if (!zoomReadout().includes('156%')) throw new Error(`Ctrl+Shift+wheel did not step the set: ${zoomReadout()}`)
 
-  await view.unmount()
+  await endScoped()
 })
 
 await checkAsync('middle drag pans one image; Shift+middle drag pans every image', async () => {
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5) })
   sizePager(900, 700)
 
   // Zoom two images so both own a scroll box.
@@ -1209,12 +1247,11 @@ await checkAsync('middle drag pans one image; Shift+middle drag pans every image
   // gesture left half-finished here would swallow the NEXT check's first click.
   await click(panes()[0])
 
-  await view.unmount()
+  await endScoped()
 })
 
 await checkAsync('zoom follows an image across a filmstrip reorder', async () => {
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5) })
   sizePager(900, 700)
 
   const second = document.querySelectorAll('.dshiv-pane')[1]
@@ -1241,13 +1278,12 @@ await checkAsync('zoom follows an image across a filmstrip reorder', async () =>
   }
   assertEqual(moved.getAttribute('data-zoomed'), 'true', 'the zoomed image is still zoomed after the reorder')
 
-  await view.unmount()
+  await endScoped()
 })
 
 await checkAsync('the settings panel persists its choices and rejects bad ones', async () => {
   window.localStorage.removeItem('dsh-image-compare:settings')
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(4) })
 
   const gear = [...document.querySelectorAll('.dshiv-zoombar button')].find((node) => node.textContent.trim() === '⚙')
   if (gear === undefined) throw new Error('the zoom row has no settings button')
@@ -1274,8 +1310,9 @@ await checkAsync('the settings panel persists its choices and rejects bad ones',
   // is in the document and the assertions below cannot read the previous one.
   exported.clearSettingsCache()
   await view.unmount()
-  const remount = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...remount.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  // Scoped, so the queries below read THIS panel: the previous tree is unmounted, and a
+  // stray read of the document could otherwise pick up a node from an earlier check.
+  const remount = await openScoped({ publish: resultBlock(4) })
   const again = [...document.querySelectorAll('.dshiv-zoombar button')].find((node) => node.textContent.trim() === '⚙')
   if (again === undefined) throw new Error('the remounted viewer has no settings button')
   await click(again)
@@ -1291,8 +1328,7 @@ await checkAsync('the settings panel persists its choices and rejects bad ones',
 })
 
 await checkAsync('a left click selects the image the zoom row drives', async () => {
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(4) })
   sizePager(900, 700)
 
   const panes = () => [...document.querySelectorAll('.dshiv-pane')]
@@ -1303,15 +1339,14 @@ await checkAsync('a left click selects the image the zoom row drives', async () 
   assertEqual(panes()[0].getAttribute('data-active'), 'false', 'the previous selection was cleared')
 
   // The per-pane minimum must reach the viewer, or a page's images overlap.
-  const style = document.querySelector('.dshiv-root').getAttribute('style') ?? ''
+  const style = document.querySelector('.dshiv-panel').getAttribute('style') ?? ''
   if (!style.includes('--dshiv-pane-min')) throw new Error(`the pane minimum never reached the viewer: ${style}`)
 
-  await view.unmount()
+  await endScoped()
 })
 
 await checkAsync('a line-mode wheel still pages the viewer', async () => {
-  const view = await mount(Card, { block: resultBlock(5), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5) })
   sizePager(900, 700)
 
   // Firefox's line mode reports ±3 per notch, which the raw threshold would discard.
@@ -1320,15 +1355,14 @@ await checkAsync('a line-mode wheel still pages the viewer', async () => {
   await act(async () => {
     pager.dispatchEvent(event)
   })
-  if (!document.querySelector('.dshiv-root').textContent.includes('第 2/3 页')) {
+  if (!document.querySelector('.dshiv-panel').textContent.includes('第 2/3 页')) {
     throw new Error(`a line-mode notch did not page: ${document.querySelector('.dshiv-bar').textContent}`)
   }
-  await view.unmount()
+  await endScoped()
 })
 
 await checkAsync('同步全部 copies the zoom AND the viewed position onto every image', async () => {
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(4) })
   sizePager(900, 700)
 
   const panes = () => [...document.querySelectorAll('.dshiv-pane')]
@@ -1386,13 +1420,12 @@ await checkAsync('同步全部 copies the zoom AND the viewed position onto ever
     assertEqual(node.scrollTop, 750, `image ${index} took the same vertical fraction`)
   }
 
-  await view.unmount()
+  await endScoped()
 })
 
 
 await checkAsync('同步全部 takes the SELECTED image as its reference', async () => {
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5) })
   sizePager(900, 700)
 
   const panes = () => [...document.querySelectorAll('.dshiv-pane')]
@@ -1440,12 +1473,11 @@ await checkAsync('同步全部 takes the SELECTED image as its reference', async
     assertEqual(node.scrollTop, 250, `the selected image's row was copied (pane ${node.getAttribute('data-pane-index')})`)
   }
 
-  await view.unmount()
+  await endScoped()
 })
 
 await checkAsync('the 100% button reaches one image pixel per screen pixel', async () => {
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5) })
   sizePager(900, 700)
 
   // jsdom lays out nothing, so model the pane's box by hand: an 800x600 image inside a
@@ -1491,12 +1523,11 @@ await checkAsync('the 100% button reaches one image pixel per screen pixel', asy
   assertEqual(Math.round(shown), 800, 'the first zoom continued from the fitted size')
   if (shown > 800) throw new Error(`the zoom jumped past the window: ${shown}px`)
 
-  await view.unmount()
+  await endScoped()
 })
 
 await checkAsync('the first zoom continues from the fitted size, not from the raw pixels', async () => {
-  const view = await mount(Card, { block: resultBlock(4), loadImage })
-  await click([...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('全屏')))
+  const view = await openScoped({ publish: resultBlock(5) })
   sizePager(900, 700)
 
   // Model a pane whose box shows an 800x600 image at 400x300 (fitted at 0.5x).
@@ -1528,7 +1559,7 @@ await checkAsync('the first zoom continues from the fitted size, not from the ra
     throw new Error(`the zoom did not start from the fitted size: ${first.style.width}`)
   }
 
-  await view.unmount()
+  await endScoped()
 })
 
 check('the bundle requires nothing but react, and labels its effects', () => {  assertEqual(exported.inject.length >= 1 && exported.inject.includes('slots'), true, 'injects the slot registry')
