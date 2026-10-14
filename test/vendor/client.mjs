@@ -86,6 +86,16 @@ export function factory(require) {
        * many of them fit before the pager scrolls instead of shrinking further).
        */
       paneHeightVh: { min: 8, max: 40, fallback: 12 },
+      /**
+       * Debug readouts: the per-image geometry in the zoom row and the measurement panel at
+       * the bottom of the settings.
+       *
+       * Off by default, and deliberately so. These lines are long, and in a narrow column they
+       * wrap into a stack taller than the images themselves — the diagnostics then fill the
+       * very area they were meant to explain. They are for working out a layout or a gesture
+       * problem, not for using the viewer.
+       */
+      showDiagnostics: { boolean: true, fallback: false },
     }
 
     /** Pointer travel that turns a middle press into a drag rather than a click. */
@@ -1352,7 +1362,7 @@ export function factory(require) {
      * zoom, the group size, whether the filmstrip starts open, and the viewer's own
      * text size.
      */
-    function SettingsPanel({ settings, onChange, showGeometry }) {
+    function SettingsPanel({ settings, onChange }) {
       /** One labelled row; the control is the caller's. */
       const row = (label, hint, control) =>
         h(
@@ -1434,7 +1444,16 @@ export function factory(require) {
             },
           }),
         ),
-        showGeometry ? h(LayoutDiagnostics) : null,
+        row(
+          '显示诊断信息',
+          '在缩放行显示每张图的实测尺寸，并在下面列出完整测量数据；排查显示问题时才需要，平时会占地方',
+          h('input', {
+            type: 'checkbox',
+            checked: settings.showDiagnostics,
+            onChange: (event) => onChange({ showDiagnostics: event.target.checked }),
+          }),
+        ),
+        settings.showDiagnostics ? h(LayoutDiagnostics) : null,
       )
     }
 
@@ -1557,7 +1576,6 @@ export function factory(require) {
        * barely moves" report can be read off a screenshot, without anyone pasting script
        * into a console. It costs no button and no state of its own.
        */
-      const [showGeometry, setShowGeometry] = useState(false)
       /** Cancels the previous view-alignment window; a stale one would fight the new one. */
       const alignStopRef = useRef(null)
       /** Pointer anchor for the NEXT zoom of one image; the pane consumes and clears it. */
@@ -2159,16 +2177,16 @@ export function factory(require) {
             },
             activeItem === undefined ? '—' : `${Math.round(activeScale * 100)}%`,
           ),
-          activeGeometry === null
-            ? null
-            : h(
+          settings.showDiagnostics && activeItem !== undefined && activeGeometry !== null
+            ? h(
                 'span',
                 {
                   className: 'dshiv-cardMeta',
                   title: '框宽 = 画布可视宽 · 滚宽 = 内容总宽 · 图宽 = 图片渲染宽；可拖动距离 = 滚宽 − 框宽',
                 },
                 `框${activeGeometry.box} 滚${activeGeometry.wide} 图${activeGeometry.image}`,
-              ),
+              )
+            : null,
           h(
             'button',
             {
@@ -2256,18 +2274,14 @@ export function factory(require) {
               type: 'button',
               className: 'dshiv-btn',
               'data-active': settingsOpen ? 'true' : 'false',
-              onClick: (event) => {
-                // Shift carries the geometry dump, so the diagnostic needs no button.
-                setShowGeometry(event.shiftKey === true)
-                setSettingsOpen((value) => (event.shiftKey === true ? true : !value))
-              },
-              title: '图片查看器设置（按住 Shift 点击可显示尺寸诊断）',
+              onClick: () => setSettingsOpen((value) => !value),
+              title: '图片查看器设置',
               'aria-label': '图片查看器设置',
             },
             '⚙',
           ),
         ),
-        settingsOpen ? h(SettingsPanel, { settings, onChange: updateSettings, showGeometry }) : null,
+        settingsOpen ? h(SettingsPanel, { settings, onChange: updateSettings }) : null,
         h(
           'div',
           {
