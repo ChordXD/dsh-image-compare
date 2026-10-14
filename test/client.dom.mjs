@@ -56,7 +56,8 @@ const REQUIRED_SPECIFIERS = []
 
 function createClient() {
   const calls = { load: 0, peek: 0 }
-  let openedRightbar = 0
+  /** What the card asked the column to open, in order. */
+  const openedTabs = []
   const loadImage = (ref) => {
     calls.load += 1
     return Promise.resolve(`${IMAGE_URL}#${ref.attachmentId}`)
@@ -88,9 +89,16 @@ function createClient() {
   // or the read throws the runtime's exact "without inject" error (an undeclared
   // `styles` read is what parked the package in the field).
   const declared = new Set(['effect', 'slots', 'get', 'inject', ...exported.inject])
-  const layout = {
-    openRightbar: () => {
-      openedRightbar += 1
+  /**
+   * The column's navigation controller, shaped like the real one.
+   *
+   * `openTab` is what opens that column and brings the tab forward — `layout.openRightbar`
+   * only reports the panel's presentation, so it cannot stand in here: a stub that accepted
+   * it would hide the very bug this replaced.
+   */
+  const sidebarRight = {
+    openTab: (kind) => {
+      openedTabs.push(kind)
     },
   }
   /** The session workspace file namespace, shaped like the built-in file tab expects. */
@@ -105,10 +113,10 @@ function createClient() {
       effect,
       slots,
       remote,
-      // `layout` is a DECLARED dependency, so the plugin reads it as a property; the
+      // `sidebarRight` is a DECLARED dependency, so the plugin reads it as a property; the
       // stub must carry it or the card's column button silently does nothing.
-      layout,
-      get: (name) => (name === 'layout' ? layout : undefined),
+      sidebarRight,
+      get: (name) => (name === 'sidebarRight' ? sidebarRight : undefined),
       // `ctx.inject` is how the plugin reaches the optional tabs registry.
       inject: (names, callback) => {
         callback({
@@ -140,7 +148,7 @@ function createClient() {
     registered,
     effects,
     effectDisposers,
-    openedRightbar: () => openedRightbar,
+    openedTabs,
     tabTypes,
   }
 }
@@ -456,14 +464,14 @@ if (cssProblems.length > 0) {
   process.exit(1)
 }
 
-const { exported, ctx, loadImage, registered, effects, effectDisposers, openedRightbar, tabTypes } = createClient()
+const { exported, ctx, loadImage, registered, effects, effectDisposers, openedTabs, tabTypes } = createClient()
 const registrationOf = (name, key) =>
   registered.find((entry) => entry.registration.name === name && entry.registration.key === key)
 
 check('exports the plugin face, inserts its own stylesheet, and claims both seats', () => {
   assertEqual(typeof exported.apply, 'function', 'apply is exported')
   assertEqual(Array.isArray(exported.inject) && exported.inject.includes('slots'), true, 'inject declares slots')
-  assertEqual(exported.inject.includes('layout'), true, 'inject declares layout (the column navigation seat)')
+  assertEqual(exported.inject.includes('sidebarRight'), true, 'inject declares the column navigation seat')
   exported.apply(ctx)
 
   const card = registrationOf('tool.call.toolview', 'view_images')
@@ -705,9 +713,9 @@ await checkAsync('the card publishes the set to the right-column panel and opens
   const view = await mount(Card, { block: resultBlock(4), loadImage })
   const button = [...view.container.querySelectorAll('button')].find((node) => node.textContent.includes('右侧栏'))
   if (button === undefined) throw new Error('the card has no right-column entry')
-  const before = openedRightbar()
+  const before = openedTabs.length
   await click(button)
-  if (openedRightbar() !== before + 1) throw new Error('the entry did not ask the layout service to open the column')
+  if (openedTabs.length !== before + 1) throw new Error('the entry did not ask the column to open this tab')
 
   // The already-mounted panel now follows the published set.
   const text = panel.container.textContent

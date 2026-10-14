@@ -126,7 +126,7 @@ console.log(`exports: ${Object.keys(exported).join(',')} | inject: ${JSON.string
 const registered = []
 const effectDisposers = []
 const tabTypes = []
-let layoutsOpened = 0
+const openedTabs = []
 exported.apply({
   effect: (callback) => {
     const disposer = callback()
@@ -135,8 +135,10 @@ exported.apply({
   },
   // The declared services are read as PROPERTIES, exactly as the plugin reads them,
   // so this stub must carry them: a stub that omits one hides a real activation bug.
-  layout: {
-    openRightbar: () => { layoutsOpened += 1 },
+  // `sidebarRight` is the navigation controller — the tab navigation goes through its
+  // `openTab`, which is the only thing that actually opens that column.
+  sidebarRight: {
+    openTab: (kind) => { openedTabs.push(kind) },
   },
   // The tab registry is reached through `ctx.inject`, which activates only once the
   // service exists (this deployment has it).
@@ -180,7 +182,9 @@ else {
     failures.push('the tab type carries no guide entry, so the column start page cannot list it')
   }
 }
-if (layoutsOpened !== 0) failures.push('apply() opened the right column by itself')
+// Activating must not navigate: the card does that when the user presses it, not apply().
+// `openedTabs` stays empty here, which is what this asserts.
+if (openedTabs.length !== 0) failures.push(`apply() opened the column by itself: ${openedTabs.join(', ')}`)
 if (styleTags.length !== 1) failures.push(`expected exactly one self-owned style tag, saw ${styleTags.length}`)
 for (const tag of styleTags) console.log(`style: <${tag.tagName} data-plugin-css="${tag.dataset.pluginCss}"> ${tag.textContent.length} bytes`)
 for (const dispose of effectDisposers) dispose()
