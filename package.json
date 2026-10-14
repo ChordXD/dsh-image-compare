@@ -30,9 +30,7 @@
       "patch": "./cordis.patch.yml"
     },
     "client": {
-      "inject": [
-        "@deepseek-ai/dsh-client-ui-sidebar-right"
-      ],
+      "inject": [],
       "platform": "web"
     }
   },
@@ -44,5 +42,13 @@
     "jsdom": "^30.1.2",
     "react": "18.2.0",
     "react-dom": "18.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChordXD/dsh-image-compare.git"
+  },
+  "homepage": "https://github.com/ChordXD/dsh-image-compare#readme",
+  "bugs": {
+    "url": "https://github.com/ChordXD/dsh-image-compare/issues"
   }
 }

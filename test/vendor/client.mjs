@@ -365,107 +365,6 @@ export function factory(require) {
 `
     //#endregion
 
-    //#region image plumbing
-
-    /** The file base name of a path spelled with either separator. */
-    function baseNameOf(path) {
-      const normalized = String(path).replaceAll('\\', '/')
-      return normalized.slice(normalized.lastIndexOf('/') + 1)
-    }
-
-    /** Narrow one wire image reference defensively; replay may carry anything. */
-    function narrowRef(value) {
-      if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
-      const { attachmentId, mediaType, bytes, width, height, name, originalDimensions } = value
-      if (typeof attachmentId !== 'string' || attachmentId === '') return undefined
-      if (typeof mediaType !== 'string' || !mediaType.startsWith('image/')) return undefined
-      return {
-        attachmentId,
-        mediaType,
-        ...(typeof bytes === 'number' ? { bytes } : {}),
-        ...(typeof width === 'number' ? { width } : {}),
-        ...(typeof height === 'number' ? { height } : {}),
-        ...(typeof name === 'string' ? { name } : {}),
-        ...(typeof originalDimensions === 'object' && originalDimensions !== null
-          ? {
-              originalDimensions: {
-                width: Number(originalDimensions.width) || 0,
-                height: Number(originalDimensions.height) || 0,
-              },
-            }
-          : {}),
-      }
-    }
-
-    /** Composed viewer model: one entry per opened image, in viewer order. */
-    function fromPayload(payload) {
-      if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined
-      const rawImages = Array.isArray(payload.images) ? payload.images : undefined
-      if (rawImages === undefined) return undefined
-      const items = []
-      for (const entry of rawImages) {
-        if (typeof entry !== 'object' || entry === null) continue
-        const ref = narrowRef(entry.image ?? entry)
-        if (ref === undefined) continue
-        const path = typeof entry.path === 'string' ? entry.path : (ref.name ?? ref.attachmentId)
-        items.push({
-          path,
-          name: typeof entry.label === 'string' && entry.label !== '' ? entry.label : (ref.name ?? baseNameOf(path)),
-          ref,
-        })
-      }
-      if (items.length === 0) return undefined
-      const rawPageSize = Number(payload.pageSize)
-      const pageSize = Number.isInteger(rawPageSize) && rawPageSize >= 1 && rawPageSize <= 6 ? rawPageSize : 2
-      return {
-        title: typeof payload.title === 'string' && payload.title !== '' ? payload.title : undefined,
-        layout: payload.layout === 'horizontal' ? 'horizontal' : 'vertical',
-        pageSize,
-        items,
-        failures: Array.isArray(payload.failures)
-          ? payload.failures
-              .filter((entry) => typeof entry === 'object' && entry !== null)
-              .map((entry) => ({ path: String(entry.path ?? ''), reason: String(entry.reason ?? '') }))
-          : [],
-      }
-    }
-
-    /**
-     * Resolve one durable reference to a browser URL, memoized per loader.
-     * A rejection releases its cache entry, so a later render retries; `retry`
-     * drops an entry up front.
-     */
-    function createImageResolver(load, peek) {
-      const cache = new Map()
-      const resolve = (ref) => {
-        const key = ref.attachmentId
-        const cached = cache.get(key)
-        if (cached !== undefined) return cached
-        if (typeof peek === 'function') {
-          const ready = peek(ref)
-          if (typeof ready === 'string' && ready !== '') {
-            const settled = Promise.resolve(ready)
-            cache.set(key, settled)
-            return settled
-          }
-        }
-        const pending = Promise.resolve()
-          .then(() => load(ref))
-          .then((url) => {
-            if (typeof url !== 'string' || url === '') throw new Error('image loader returned no URL')
-            return url
-          })
-          .catch((error) => {
-            if (cache.get(key) === pending) cache.delete(key)
-            throw error
-          })
-        cache.set(key, pending)
-        return pending
-      }
-      resolve.retry = (ref) => cache.delete(ref.attachmentId)
-      return resolve
-    }
-
     /**
      * Load one image URL for display, tracking its ready/failed state.
      * Bumping the returned retry callback re-runs the load once.
@@ -528,7 +427,7 @@ export function factory(require) {
     /** Listeners for every session; the snapshot getter filters by key. */
     const viewerListeners = new Set()
 
-    /** The session key used when a publisher has no session (a Tool card, say). */
+    /** The session key used when the panel is rendered without a session (the checks do that). */
     const DEFAULT_SESSION_KEY = '*'
 
     /** The slot one session is showing, or the shared empty slot. */
@@ -1344,9 +1243,15 @@ export function factory(require) {
     /**
      * The paginated viewer.
      *
-     * One implementation, two shells: `embedded` fills the right column (its
-     * parent owns the geometry), and the default renders as the floating
-     * full-window layer that the Tool card can still open.
+     * One implementation, two shells: `embedded` fills the right column (its parent owns the
+     * geometry and the column tab is the way out), and the default renders as a floating
+     * full-window layer.
+     *
+     * The floating shell has NO caller in this release: the panel always embeds, and the chat
+     * card that used to open it went with the model-facing tools. It is kept because the
+     * viewer's pageable body, keyboard rules and skip-link all still key off it — deleting the
+     * branch is a separate change, not a quiet one, and the roadmap may want it back when the
+     * tool returns.
      */
     function Viewer({ viewer, resolve, initialPage, onClose, embedded = false, onReorder }) {
       const items = viewer.items
@@ -1369,23 +1274,10 @@ export function factory(require) {
       const [activeIndex, setActiveIndex] = useState(0)
       const [panMode, setPanMode] = useState(false)
       const [settingsOpen, setSettingsOpen] = useState(false)
-      /**
-       * Shift + the gear opens the panel WITH a live geometry dump.
-       *
-       * A readout rather than a control: it exists so the numbers behind a "the drag
-       * barely moves" report can be read off a screenshot, without anyone pasting script
-       * into a console. It costs no button and no state of its own.
-       */
       /** Cancels the previous view-alignment window; a stale one would fight the new one. */
       const alignStopRef = useRef(null)
       /** Pointer anchor for the NEXT zoom of one image; the pane consumes and clears it. */
       const [anchors, setAnchors] = useState(() => new Map())
-      /**
-       * The view a set-wide zoom hands to the other images, plus the token that hands it
-       * down. State, because a pane's layout effect only re-runs when something it depends
-       * on changes — a second zoom-all to the SAME magnification would never reach it
-       * through a ref. The ref holds the value being published.
-       */
       /**
        * The ACTIVE pane's live geometry, surfaced in the zoom row.
        *
@@ -2515,8 +2407,7 @@ export function factory(require) {
     /**
      * Resolve a workspace file path to a browser URL.
      *
-     * The Tool path resolves durable attachments through the session loader; a
-     * picked workspace file is not an attachment, so the URL points at the host's
+     * A picked workspace file is not an attachment, so the URL points at the host's
      * read-only raw route instead: the browser fetches the bytes directly, which
      * keeps this side free of any file-reading capability and covers a remote
      * workspace because the host resolves it through the session.
@@ -2687,10 +2578,8 @@ export function factory(require) {
       /**
        * Move one image to another position.
        *
-       * The QUEUE is the order: it is the only thing the user edits here, so a
-       * reorder updates the queue first and the viewer is republished from it. If
-       * the shown set came from a Tool card instead (no workspace paths to address),
-       * only the viewer is republished — the queue owns nothing to reorder.
+       * The QUEUE is the order: it is the only thing the user edits here, so a reorder
+       * updates the queue first and the viewer is republished from it.
        */
       const reorderViewer = (from, to) => {
         const current = viewerRef.current

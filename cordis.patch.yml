@@ -1,11 +1,10 @@
 # dsh-image-compare bundle patch: inserts this plugin into a profile's layer stack.
 #
-# The plugin is ONE row. Its apply() registers the model-facing tools (host half:
-# `view_images` and `browse_images`, plus the two read-only routes the panel reads
-# directory listings and image bytes from) and, through the same package's
-# `dsh.client` declaration, the paginated image viewer (client half: a Tool card
-# and a right-column tab). No other row is touched: the tools read through the
-# composed `ctx.fs` and store durable images through the mounted `ctx.attachments`.
+# The plugin is ONE row. Its apply() registers the two read-only routes the right-column panel
+# reads directory listings and image bytes from; the same package's `dsh.client` declaration
+# adds the paginated image viewer itself (a right-column tab). No other row is touched: the
+# routes resolve paths through the composed `ctx.fs`, and the client half reaches them over
+# HTTP rather than through any Client-side carrier.
 - insert:
     - id: dsh-image-compare
       name: 'dsh-image-compare'

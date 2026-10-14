@@ -69,7 +69,7 @@
 dsh plugin --profile web add github:ChordXD/dsh-image-compare
 ```
 
-从 GitHub 安装会执行构建脚本，pnpm 默认拦截；dsh 会打印需要加进该 profile `pnpm-workspace.yaml` 的 `allowBuilds` 键名，加好后重跑即可。想锁定版本就带上 commit：`github:ChordXD/dsh-image-compare#<sha>`。
+包内没有任何构建步骤（纯 JS，`package.json` 里没有 `scripts`），所以通常装上即用。如果 dsh 仍然提示 `allowBuilds`，按它的提示把给出的键名加进该 profile 的 `pnpm-workspace.yaml` 再重跑即可。想锁定版本就带上 commit：`github:ChordXD/dsh-image-compare#<sha>`。
 
 ### 卸载
 
@@ -141,9 +141,9 @@ dsh plugin --profile web add github:ChordXD/dsh-image-compare
 | `V` | 切换上下 / 左右翻页 |
 | `2`–`6` | 每页 1 / 2 / 3 / 4 / 6 张 |
 | `F` | 显示 / 隐藏缩略图条 |
-| `Esc` | 关闭全屏浮层 |
+| `Esc` | 关闭全屏浮层（面板里没有浮层，`Esc` 不做任何事） |
 
-齿轮里可以设置：默认缩放、每页张数、是否默认展开缩略图条、查看器字号、单张图片最小高度。同一页的图片会平分可用高度，所以这个下限会自动让位于更挤的一页，不会把图片挤出画面。
+齿轮里可以设置：默认缩放、每页张数、是否默认展开缩略图条、查看器字号、单张图片最小高度，以及是否显示诊断信息（默认关闭；它会在缩放行显示每张图的实测尺寸，并在设置里列出完整测量数据，排查显示问题时才需要）。同一页的图片会平分可用高度，所以这个下限会自动让位于更挤的一页，不会把图片挤出画面。
 
 ## 与其他看图插件的区别
 

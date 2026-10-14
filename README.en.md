@@ -69,7 +69,7 @@ The plugin is a standard DSH profile bundle and carries every declaration it nee
 dsh plugin --profile web add github:ChordXD/dsh-image-compare
 ```
 
-Installing from GitHub runs its build scripts, which pnpm blocks by default; dsh prints the exact `allowBuilds` key to add to that profile's `pnpm-workspace.yaml` — add it and re-run. To pin a revision, append a commit: `github:ChordXD/dsh-image-compare#<sha>`.
+The package has no build step at all (plain JS, no `scripts` in `package.json`), so it normally installs and runs as-is. If dsh still prints an `allowBuilds` notice, add the key it names to that profile's `pnpm-workspace.yaml` and re-run. To pin a revision, append a commit: `github:ChordXD/dsh-image-compare#<sha>`.
 
 ### Uninstall
 
@@ -141,9 +141,9 @@ Keyboard:
 | `V` | Switch between up/down and left/right paging |
 | `2`–`6` | 1 / 2 / 3 / 4 / 6 images per page |
 | `F` | Show / hide the filmstrip |
-| `Esc` | Close the full-screen view |
+| `Esc` | Close the full-screen view (the panel has none, so `Esc` does nothing there) |
 
-The gear panel holds: default zoom, images per page, whether the filmstrip starts open, the viewer's own font size, and the minimum height of one image. Images on a page share the available height, so that floor yields to a crowded page instead of pushing an image out of view.
+The gear panel holds: default zoom, images per page, whether the filmstrip starts open, the viewer's own font size, the minimum height of one image, and whether to show the diagnostics (off by default; it adds each image's measured size to the zoom row and the full measurement dump to this panel, which is only worth it when chasing a layout problem). Images on a page share the available height, so that floor yields to a crowded page instead of pushing an image out of view.
 
 ## How it differs from other image plugins
 
