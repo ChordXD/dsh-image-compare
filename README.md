@@ -2,6 +2,8 @@
 
 [English](README.en.md)
 
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/chordxd/dsh-image-compare)
+
 **在侧边栏里同时对比查看多张图片**的 DeepSeek Harness 插件。
 
 想在 DSH 里对照"改前 vs 改后"、横向比五个方案的截图，原来只能一张张点开、来回翻。装上这个插件后，右栏会多出一个「**图片查看器**」面板：
